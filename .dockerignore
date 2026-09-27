@@ -1,0 +1,9 @@
+.git
+.slockdev
+apps
+node_modules
+**/node_modules
+**/dist
+**/.turbo
+**/*.log
+.dockerignore
