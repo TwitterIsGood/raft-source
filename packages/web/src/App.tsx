@@ -43,6 +43,7 @@ import {
   shouldRetryAuthRestore,
 } from "./utils/authRestoreMachine";
 import { getRestoreTimeoutAction } from "./utils/restoreTimeoutPolicy";
+import { copyTextToClipboard } from "./utils/selectMarkdown";
 import { shouldRecoverAuthOnBrowserSignal } from "./utils/browserRecoveryPolicy";
 import { PENDING_INVITE_STORAGE_KEY, takePendingInviteRedirectPath } from "./utils/socialAuth";
 import { requiresAccountProfileSetup } from "./utils/accountProfileSetup";
@@ -231,7 +232,7 @@ function SlockdevDebugPanel(props: SlockdevDebugPanelProps) {
 
   const copySeedCommand = async () => {
     try {
-      await navigator.clipboard.writeText(seedCommand);
+      await copyTextToClipboard(seedCommand);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1200);
     } catch (err) {

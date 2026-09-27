@@ -6,6 +6,7 @@ import type { RuntimeInfo, RuntimeSelectionOption } from "@botiverse/raft-shared
 import { Check, ChevronRight, Copy, KeyRound, Monitor, Terminal, X } from "lucide-react";
 import type { ServerSetupRuntimeStatus } from "./serverSetupProjection";
 import { formatRelativeTime } from "../../utils/relativeTime";
+import { copyTextToClipboard } from "../../utils/selectMarkdown";
 import ComputerCommandGuide from "../machine/ComputerCommandGuide";
 import Banner from "../ui/Banner";
 import Button from "../ui/Button";
@@ -539,7 +540,7 @@ function OfflineComputerRecovery({
   const { formatMessage, locale } = useIntl();
   const [copied, setCopied] = useState<string | null>(null);
   const copy = (command: string) => {
-    void navigator.clipboard?.writeText(command);
+    void copyTextToClipboard(command).catch(() => undefined);
     setCopied(command);
     setClockTimeout(() => setCopied(null), 1_500);
   };

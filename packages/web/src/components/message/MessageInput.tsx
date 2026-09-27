@@ -70,6 +70,7 @@ import {
   formatAttachmentUploadServerError,
 } from "../../utils/attachmentUploadErrorPresentation";
 import { uploadLegacyAttachmentWithIdleTimeout } from "../../utils/legacyAttachmentUpload";
+import { randomId } from "../../utils/randomId";
 import { SELECTED_TEXT_QUOTE_EVENT, appendQuoteToComposer } from "./selectedTextQuote";
 import type { SelectedTextQuoteDetail } from "./selectedTextQuote";
 import { PendingMentionActionStrip } from "./PendingMentionActionStrip";
@@ -1490,7 +1491,7 @@ export default function MessageInput({
       preview: isPreviewableImageFile(file) ? URL.createObjectURL(file) : null,
       uploadStatus: "validating",
       uploadProgress: 0,
-      uploadClientRequestId: crypto.randomUUID(),
+      uploadClientRequestId: randomId(),
     }));
     const provisionalIds = new Set(provisionalFiles.map((file) => file.id));
     const selectionGeneration = attachmentSelectionGenerationRef.current;
@@ -2549,13 +2550,17 @@ export default function MessageInput({
         </div>
       )}
 
+      {/* Rendered off-screen rather than `display:none`: some engines refuse to
+          open a file picker for a click on an unrendered input. */}
       <input
         ref={imageInputRef}
         data-testid="composer-media-input"
         type="file"
         accept={MEDIA_PICKER_ACCEPT}
         multiple
-        className="hidden"
+        tabIndex={-1}
+        aria-hidden
+        className="sr-only"
         onChange={handleAttachmentPickerChange}
       />
 
@@ -2563,7 +2568,9 @@ export default function MessageInput({
         ref={fileInputRef}
         type="file"
         multiple
-        className="hidden"
+        tabIndex={-1}
+        aria-hidden
+        className="sr-only"
         onChange={handleAttachmentPickerChange}
       />
 

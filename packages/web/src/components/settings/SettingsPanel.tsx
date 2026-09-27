@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import MobileDownloadQr from "./MobileDownloadQr";
 import { MOBILE_DOWNLOAD_CHOOSER_PATH, mobileDownloadUrl } from "../../utils/mobileDownloadUrl";
+import { copyTextToClipboard } from "../../utils/selectMarkdown";
 import { getApiErrorResponse } from "../../utils/apiErrorResponse";
 import {
   DEFAULT_BILLING_INTERVAL,
@@ -220,6 +221,7 @@ import {
   SegmentedControlItem,
   SegmentedControlLabel,
   Switch,
+  toast,
 } from "raft-ui";
 import {
   BillingIntervalSegmentedControl,
@@ -2863,9 +2865,13 @@ function JoinLinksSection() {
   const buildJoinLinkUrl = (token: string) => `${window.location.origin}/join/${token}`;
 
   const handleCopy = async (linkId: string, token: string) => {
-    await navigator.clipboard.writeText(buildJoinLinkUrl(token));
-    setCopiedLinkId(linkId);
-    window.setTimeout(() => setCopiedLinkId((current) => current === linkId ? null : current), 1500);
+    try {
+      await copyTextToClipboard(buildJoinLinkUrl(token));
+      setCopiedLinkId(linkId);
+      window.setTimeout(() => setCopiedLinkId((current) => current === linkId ? null : current), 1500);
+    } catch {
+      toast.error(formatMessage({ id: "message.chatPanel.clipboardBlocked" }));
+    }
   };
 
   const handleRevoke = async (linkId: string) => {
@@ -5714,7 +5720,7 @@ export function IntegrationsSection() {
     if (!createdSecret) return;
     setError("");
     try {
-      await navigator.clipboard.writeText(createdSecret);
+      await copyTextToClipboard(createdSecret);
       setSecretCopied(true);
       if (secretCopyResetRef.current) {
         window.clearTimeout(secretCopyResetRef.current);
@@ -5781,7 +5787,7 @@ export function IntegrationsSection() {
     if (!shareUrl) return;
     setError("");
     try {
-      await navigator.clipboard.writeText(shareUrl);
+      await copyTextToClipboard(shareUrl);
       setShareCopied(true);
       if (shareCopyResetRef.current) {
         window.clearTimeout(shareCopyResetRef.current);

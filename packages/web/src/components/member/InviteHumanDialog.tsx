@@ -14,6 +14,7 @@ import {
   SelectList,
   SelectTrigger,
   SelectValue,
+  toast,
 } from "raft-ui";
 import type { ServerRole } from "@botiverse/raft-shared";
 import { SERVER_GUEST_FEATURE_FLAG_KEY, formatBillingCapacityLimitMessage, getBillingCapacityLimitState, getBillingUsage, validateEmailAddress } from "@botiverse/raft-shared";
@@ -24,6 +25,7 @@ import { useAppNavigate } from "../../hooks/useAppNavigate";
 import api from "../../api/client";
 import DialogCard from "../ui/DialogCard";
 import Banner from "../ui/Banner";
+import { copyTextToClipboard } from "../../utils/selectMarkdown";
 
 /**
  * The roles an invite can grant. Derived from the shared `ServerRole` union
@@ -173,9 +175,13 @@ export default function InviteHumanDialog({
 
   const handleCopy = async () => {
     if (!joinUrl) return;
-    await navigator.clipboard.writeText(joinUrl);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    try {
+      await copyTextToClipboard(joinUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error(formatMessage({ id: "message.chatPanel.clipboardBlocked" }));
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

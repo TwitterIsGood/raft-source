@@ -81,6 +81,7 @@ import NotificationActivationBanner, {
 } from "./NotificationActivationBanner";
 import type { ForwardDelivery } from "./ForwardComposerDialog";
 import { formatActivityText } from "../../utils/activity";
+import { copyTextToClipboard } from "../../utils/selectMarkdown";
 import { resolveAgentDmProfileSource } from "../layout/agentDmProfileSource";
 
 const ForwardComposerDialog = lazy(() => import("./ForwardComposerDialog"));
@@ -1242,7 +1243,7 @@ export default function ChatPanel({
       return;
     }
     const links = buildSelectedMessagePermalinks({ serverSlug, channel, messages: selected });
-    void navigator.clipboard.writeText(links.join("\n")).then(() => {
+    void copyTextToClipboard(links.join("\n")).then(() => {
       toast.success(formatCopyLinksToast(links.length, formatMessageRef.current), SELECTION_TOAST_OPTIONS);
     }).catch(() => {
       toast.error(formatMessageRef.current({ id: "message.chatPanel.clipboardBlocked" }), SELECTION_TOAST_OPTIONS);

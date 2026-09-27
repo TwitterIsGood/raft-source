@@ -26,6 +26,7 @@ import { openMediaPreview } from "./openMediaPreview";
 import { openDocumentPreview } from "./openDocumentPreview";
 import { downloadAttachmentById } from "./downloadAttachment";
 import { forwardToast } from "./forwardToast";
+import { randomId } from "../../utils/randomId";
 import ForwardComposerTargetList from "./ForwardComposerTargetList";
 import ForwardComposerMobile from "./ForwardComposerMobile";
 import ForwardComposerWarnings from "./ForwardComposerWarnings";
@@ -384,7 +385,7 @@ export default function ForwardComposerDialog({
 
       let response: ForwardBatchResponse;
       try {
-        forwardRequestIdRef.current ??= crypto.randomUUID();
+        forwardRequestIdRef.current ??= randomId();
         const res = await api.post<ForwardBatchResponse>("/messages/forward", {
           destinationChannelIds: [...entriesByChannelId.keys()],
           requestId: forwardRequestIdRef.current,

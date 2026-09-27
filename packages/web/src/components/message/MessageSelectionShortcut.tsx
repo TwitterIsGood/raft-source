@@ -4,6 +4,7 @@ import { Copy, TextQuote } from "lucide-react";
 import { useIntl } from "react-intl";
 import { useSelectionStore } from "../../store/selectionStore";
 import { emitSelectedTextQuote } from "./selectedTextQuote";
+import { copyTextToClipboard } from "../../utils/selectMarkdown";
 import {
   getMessageSelectionShortcutTarget,
   placeMessageSelectionShortcut,
@@ -251,7 +252,7 @@ export default function MessageSelectionShortcut() {
 
   const handleCopy = useCallback(() => {
     if (!target) return;
-    void navigator.clipboard.writeText(target.text);
+    void copyTextToClipboard(target.text).catch(() => undefined);
     dismissCurrentSelection();
     window.getSelection()?.removeAllRanges();
   }, [dismissCurrentSelection, target]);

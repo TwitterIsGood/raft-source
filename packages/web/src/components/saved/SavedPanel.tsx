@@ -10,6 +10,7 @@ import { useServerStore } from "../../store/serverStore";
 import { useThreadStore } from "../../store/threadStore";
 import { useAppNavigate, useMobileBack, buildMessagePermalink } from "../../hooks/useAppNavigate";
 import { resolveMessageSenderMemberFromList } from "../../utils/messageSenderMember";
+import { copyTextToClipboard } from "../../utils/selectMarkdown";
 import { formatRelativeTime } from "../../utils/relativeTime";
 import ContextMenuDivider from "../ui/ContextMenuDivider";
 import MenuItem from "../ui/MenuItem";
@@ -67,11 +68,13 @@ const SavedItem = memo(function SavedItem({ entry, onOpenEntry, onRemoveMessage,
       routeKind,
       threadParentMessageId: isThread ? entry.parentMessageId : null,
     });
-    navigator.clipboard.writeText(url).then(() => setCtxMenu(null));
+    void copyTextToClipboard(url).catch(() => undefined);
+    setCtxMenu(null);
   }, [serverSlug, isDm, isThread, entry.parentChannelId, entry.parentMessageId, entry.channelId, entry.messageId]);
 
   const handleCopyMarkdown = useCallback(() => {
-    navigator.clipboard.writeText(entry.content).then(() => setCtxMenu(null));
+    void copyTextToClipboard(entry.content).catch(() => undefined);
+    setCtxMenu(null);
   }, [entry.content]);
 
   const handleRemove = useCallback(() => {

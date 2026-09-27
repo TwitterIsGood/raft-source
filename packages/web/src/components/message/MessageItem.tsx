@@ -174,6 +174,7 @@ import type { ForwardedBundleAttachmentSnapshot, ForwardedBundleItem } from "./F
 import ForwardedBundleRouteCard from "./ForwardedBundleRouteCard";
 import { openConversationAgentActivity, openConversationAgentProfile } from "../../utils/profilePanelUrl";
 import { formatMemberRole } from "../../utils/memberRoleLabel";
+import { copyTextToClipboard } from "../../utils/selectMarkdown";
 import { dispatchSenderMentionInsert } from "./senderMentionInsert";
 
 const REACTION_PICKER_EVENT = "raft:message-reaction-picker-open";
@@ -3967,9 +3968,8 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
       routeKind,
       threadParentMessageId: parentMessageId ?? null,
     });
-    navigator.clipboard.writeText(url).then(() => {
-      setCtxMenu(null);
-    });
+    void copyTextToClipboard(url).catch(() => undefined);
+    setCtxMenu(null);
   }, [serverSlug, parentChannelId, parentMessageId, message.channelId, message.id, navigableChannels]);
 
   const handleOpenPermalink = useCallback((href: string) => {
@@ -4985,7 +4985,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
           </MenuItem>
           <MenuItem
             icon={<Copy size={14} />}
-            onClick={() => { navigator.clipboard.writeText(message.content).then(() => setCtxMenu(null)); }}
+            onClick={() => { void copyTextToClipboard(message.content).catch(() => undefined); setCtxMenu(null); }}
           >
             {formatMessage({ id: "message.messageItem.copyMarkdown" })}
           </MenuItem>
@@ -5138,7 +5138,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
           <MenuItem
             icon={<Copy size={14} />}
             onClick={() => {
-              void navigator.clipboard.writeText(senderDisplayName);
+              void copyTextToClipboard(senderDisplayName).catch(() => undefined);
               setSenderCtxMenu(null);
             }}
           >
@@ -5148,7 +5148,7 @@ const MessageItem = memo(function MessageItem({ message, mentionMap, channels, p
             <MenuItem
               icon={<Copy size={14} />}
               onClick={() => {
-                void navigator.clipboard.writeText(senderHandleText);
+                void copyTextToClipboard(senderHandleText).catch(() => undefined);
                 setSenderCtxMenu(null);
               }}
             >

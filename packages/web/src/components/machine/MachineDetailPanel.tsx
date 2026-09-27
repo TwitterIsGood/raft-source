@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Badge } from "raft-ui";
+import { Badge, toast } from "raft-ui";
 import { useIntl } from "react-intl";
 import { Trash2, Monitor, Check, Copy, RefreshCw, FolderOpen, Play, Plus, X, Pencil, Square, RotateCcw, CheckCircle, AlertCircle, Terminal, ChevronRight } from "lucide-react";
 import DialogCard from "../ui/DialogCard";
@@ -17,6 +17,7 @@ import api from "../../api/client";
 import { useAppNavigate, useMobileBack } from "../../hooks/useAppNavigate";
 import { useServerPermissions } from "../../hooks/useServerPermissions";
 import { getServerUrl } from "../../utils/server";
+import { copyTextToClipboard } from "../../utils/selectMarkdown";
 import { formatRelativeTime } from "../../utils/relativeTime";
 import { getComputerCommands, getDaemonConnectCommand } from "../../utils/computerSetupCommand";
 import { canViewMachineRuntimeAccountUsage } from "../../utils/machineRuntimeUsageVisibility";
@@ -786,11 +787,15 @@ export default function MachineDetailPanel({
   };
 
   const handleCopy = async (target: CommandCopyTarget, text: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopiedCommand(target);
-    setTimeout(() => {
-      setCopiedCommand((current) => (current === target ? null : current));
-    }, 2000);
+    try {
+      await copyTextToClipboard(text);
+      setCopiedCommand(target);
+      setTimeout(() => {
+        setCopiedCommand((current) => (current === target ? null : current));
+      }, 2000);
+    } catch {
+      toast.error(formatMessage({ id: "message.chatPanel.clipboardBlocked" }));
+    }
   };
 
 

@@ -20,6 +20,7 @@ import type {
   PwaInstallPlatform,
   PwaInstallSurface,
 } from "../../utils/pwaInstall";
+import { copyTextToClipboard } from "../../utils/selectMarkdown";
 
 function isMobileViewportNow(): boolean {
   if (typeof window === "undefined") return false;
@@ -245,7 +246,7 @@ export default function PwaInstallPrompt() {
 
   const copyLink = () => {
     if (typeof window === "undefined") return;
-    void navigator.clipboard?.writeText(window.location.href);
+    void copyTextToClipboard(window.location.href).catch(() => undefined);
     track("pwa_install_cta_clicked", "ios_instruction_sheet");
   };
 

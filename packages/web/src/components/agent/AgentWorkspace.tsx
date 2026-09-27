@@ -22,6 +22,7 @@ import Spinner from "../ui/Spinner";
 import { useResizablePanel } from "../../hooks/useResizablePanel";
 import { useTimeFormatter } from "../../hooks/useTimeFormatter";
 import { transparentImageBackgroundClass } from "../../utils/imagePreviewStyles";
+import { copyTextToClipboard } from "../../utils/selectMarkdown";
 import { MARKDOWN_BLOCKQUOTE_BASE_CLASS } from "../markdown/MarkdownContent";
 import CodeBlock from "../markdown/CodeBlock";
 import CopyIconButton from "../ui/CopyIconButton";
@@ -376,10 +377,10 @@ export default function AgentWorkspace({ agentId, compact }: { agentId: string; 
   const [copied, setCopied] = useState(false);
 
   const handleCopyPath = useCallback(() => {
-    navigator.clipboard.writeText(workspacePath).then(() => {
+    void copyTextToClipboard(workspacePath).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    });
+    }).catch(() => undefined);
   }, [workspacePath]);
 
   return (

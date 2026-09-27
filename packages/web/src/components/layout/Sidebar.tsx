@@ -90,6 +90,7 @@ import {
 } from "../../utils/computerUpgradeIndicator";
 import { isElectronDesktopShell } from "../../utils/desktopShell";
 import { getMachineRunLabelDescriptor } from "../../utils/machineRunLabel";
+import { randomId } from "../../utils/randomId";
 import { MachineRunLabel } from "../machine/MachineRunLabel";
 import { hasOtherServerActivityUnread, parseServerUnreadSummaryRows, retainServerUnreadSummary } from "../../utils/serverUnreadSummary";
 import type { ServerUnreadSummary } from "../../utils/serverUnreadSummary";
@@ -2855,7 +2856,7 @@ export default function Sidebar({ mobileInline, bottomSlot, workspaceRailMode }:
   }, [sectionPlacements, updateSidebarOrder]);
 
   const createCustomSection = useCallback((value: { name: string; emoji: string | null }, moveItem?: SidebarMovableItem) => {
-    const id = crypto.randomUUID();
+    const id = randomId();
     const section: SidebarCustomSection = { id, name: value.name, emoji: value.emoji, sortMode: "manual" };
     const nextSectionPlacements = moveItem
       ? moveSidebarItemToCustomSection(sectionPlacements, moveItem, id)

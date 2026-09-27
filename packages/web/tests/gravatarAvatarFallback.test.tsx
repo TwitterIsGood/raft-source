@@ -2,6 +2,7 @@ import "./helpers/domSetup";
 
 import assert from "node:assert/strict";
 import test, { afterEach } from "node:test";
+import { act } from "react";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import GravatarAvatar from "../src/components/member/GravatarAvatar";
 
@@ -54,4 +55,31 @@ test("GravatarAvatar caches a successful load across remounts of the same hash",
   assert.ok(secondImg);
   assert.doesNotMatch(secondImg.className, /opacity-0/);
   assert.equal(second.container.querySelector("svg"), null);
+});
+
+// The deployed instance is served over plain HTTP, where `crypto.subtle` is
+// absent (secure-context-only). Deriving the hash client-side therefore
+// rejected unhandled; the placeholder icon is the correct outcome there.
+test("GravatarAvatar keeps the placeholder when crypto.subtle is unavailable", async () => {
+  const originalSubtle = crypto.subtle;
+  const rejections: unknown[] = [];
+  const onRejection = (reason: unknown) => {
+    rejections.push(reason);
+  };
+  Object.defineProperty(crypto, "subtle", { configurable: true, value: undefined });
+  process.on("unhandledRejection", onRejection);
+  try {
+    const { container } = render(<GravatarAvatar email="person@example.com" iconSize={16} />);
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    assert.ok(container.querySelector("svg"), "User placeholder must render");
+    assert.equal(container.querySelector("img"), null, "no hash means no Gravatar request");
+    assert.deepEqual(rejections, [], "deriving the hash must not reject unhandled");
+  } finally {
+    process.off("unhandledRejection", onRejection);
+    Object.defineProperty(crypto, "subtle", { configurable: true, value: originalSubtle });
+  }
 });

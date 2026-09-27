@@ -751,3 +751,36 @@ test("removing an in-flight direct upload aborts PUT and cancels its session", a
   assert.equal(screen.queryByAltText("cancel.png"), null);
   assert.equal(sendMessage.calls.length, 0);
 });
+
+// The deployed instance is served over plain HTTP, where the browser omits
+// `crypto.randomUUID` entirely (secure-context-only). Minting the upload
+// request id with a bare call threw inside the picker's change handler, before
+// any state update, so a picked file vanished without a trace.
+test("composer accepts a picked file when the origin hides crypto.randomUUID", async () => {
+  URL.createObjectURL = (() => "blob:insecure-origin") as typeof URL.createObjectURL;
+  URL.revokeObjectURL = (() => undefined) as typeof URL.revokeObjectURL;
+  api.post = (async (url: string) => {
+    if (url === "/attachments/upload") {
+      return { data: { attachments: [{ id: "attachment-insecure-1" }] } };
+    }
+    throw new Error(`unexpected POST ${url}`);
+  }) as typeof api.post;
+  const sendMessage = makeSendSpy();
+
+  const originalRandomUUID = crypto.randomUUID;
+  Object.defineProperty(crypto, "randomUUID", { configurable: true, value: undefined });
+  try {
+    const view = setupComposer(sendMessage);
+    await attachImage(view.fileInput!, "insecure-origin.png");
+
+    await waitFor(() => assert.ok(screen.getByRole("button", { name: "Remove insecure-origin.png" })));
+    await submitForm(view.form);
+    await waitFor(() => assert.equal(sendMessage.calls.length, 1));
+    assert.deepEqual(sendMessage.calls[0], {
+      content: "[1 attachment]",
+      attachmentIds: ["attachment-insecure-1"],
+    });
+  } finally {
+    Object.defineProperty(crypto, "randomUUID", { configurable: true, value: originalRandomUUID });
+  }
+});

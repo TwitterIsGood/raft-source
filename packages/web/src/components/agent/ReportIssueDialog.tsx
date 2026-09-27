@@ -14,6 +14,7 @@ import { useAgentStore } from "../../store/agentStore";
 import type { Agent } from "../../store/agentStore";
 import { useMachineStore } from "../../store/machineStore";
 import { buildFeedbackExportBundle } from "../../utils/feedbackExportBundle";
+import { copyTextToClipboard } from "../../utils/selectMarkdown";
 import type { FeedbackExportBundleV2 } from "../../utils/feedbackExportBundle";
 import { detectBrowserTimezone } from "../../utils/timeFormatting";
 import { WEB_APP_VERSION } from "../../utils/webAppVersion";
@@ -393,7 +394,7 @@ export default function ReportIssueDialog({
       submittedReport.artifactId ? `artifactId: ${submittedReport.artifactId}` : null,
       submittedReport.issueDescription ? `issueDescription:\n${submittedReport.issueDescription}` : null,
     ].filter(Boolean);
-    await navigator.clipboard.writeText(lines.join("\n"));
+    await copyTextToClipboard(lines.join("\n"));
     setReportRefCopied(true);
   };
 

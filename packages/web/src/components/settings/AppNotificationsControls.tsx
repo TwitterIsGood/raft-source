@@ -16,6 +16,7 @@ import Button from "../ui/Button";
 import Checkbox from "../ui/Checkbox";
 import SectionEyebrow from "../ui/SectionEyebrow";
 import type { MessageId } from "../../i18n/messages";
+import { copyTextToClipboard } from "../../utils/selectMarkdown";
 
 // Holds catalog IDS, not display text: module scope cannot call formatMessage.
 // Call sites format. Same shape as the sub-batch F distribution helpers.
@@ -362,7 +363,7 @@ export function DeveloperAppNotifications({
   const copySecret = async () => {
     if (!signingSecret) return;
     try {
-      await navigator.clipboard.writeText(signingSecret);
+      await copyTextToClipboard(signingSecret);
       setSecretState((current) => current?.clientId === clientId
         ? { ...current, copied: true }
         : current);

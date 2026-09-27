@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Check, Copy, Terminal } from "lucide-react";
-import { Badge, SegmentedControl, SegmentedControlItem, SegmentedControlLabel } from "raft-ui";
+import { Badge, SegmentedControl, SegmentedControlItem, SegmentedControlLabel, toast } from "raft-ui";
 import { useIntl } from "react-intl";
 import type { ComputerCommandPlatform } from "../../utils/computerSetupCommand";
+import { copyTextToClipboard } from "../../utils/selectMarkdown";
 import SectionEyebrow from "../ui/SectionEyebrow";
 
 interface ComputerCommandGuideProps {
@@ -157,11 +158,15 @@ export default function ComputerCommandGuide({
   const daemonCopyTarget: CopyTarget = platform === "windows" ? "windows-daemon" : "mac-linux-daemon";
 
   const handleCopy = async (target: CopyTarget, command: string) => {
-    await navigator.clipboard.writeText(command);
-    setCopiedCommand(target);
-    setTimeout(() => {
-      setCopiedCommand((current) => (current === target ? null : current));
-    }, 2000);
+    try {
+      await copyTextToClipboard(command);
+      setCopiedCommand(target);
+      setTimeout(() => {
+        setCopiedCommand((current) => (current === target ? null : current));
+      }, 2000);
+    } catch {
+      toast.error(formatMessage({ id: "message.chatPanel.clipboardBlocked" }));
+    }
   };
 
   const requestWindowsDaemonCommand = () => onRequestWindowsDaemonCommand?.();

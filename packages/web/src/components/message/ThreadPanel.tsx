@@ -67,6 +67,7 @@ import { buildSystemMessageRenderStates } from "./systemMessageGrouping";
 import { useStableMessageGrouping } from "./messageGrouping";
 import { useTimeFormatter } from "../../hooks/useTimeFormatter";
 import { resolveMessageSenderMember } from "../../utils/messageSenderMember";
+import { copyTextToClipboard } from "../../utils/selectMarkdown";
 import { mergeParentTaskMetadata } from "../../utils/taskMetadata";
 import type { SyncScopeKey } from "@botiverse/raft-shared";
 import {
@@ -788,7 +789,7 @@ export default function ThreadPanel({
         threadParentMessageId: selectedMessage.channelId === threadChannelId ? parentMessageId : null,
       })
     );
-    void navigator.clipboard.writeText(links.join("\n")).then(() => {
+    void copyTextToClipboard(links.join("\n")).then(() => {
       toast.success(formatCopyLinksToast(links.length, formatMessageRef.current), SELECTION_TOAST_OPTIONS);
     }).catch(() => {
       toast.error(formatMessageRef.current({ id: "message.chatPanel.clipboardBlocked" }), SELECTION_TOAST_OPTIONS);

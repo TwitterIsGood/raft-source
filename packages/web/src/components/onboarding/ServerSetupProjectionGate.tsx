@@ -14,6 +14,7 @@ import ServerSetupHandoffStep from "./ServerSetupHandoffStep";
 import ServerSetupSurveyStep from "./ServerSetupSurveyStep";
 import { getComputerCommands, getDaemonConnectCommand } from "../../utils/computerSetupCommand";
 import { getServerUrl } from "../../utils/server";
+import { copyTextToClipboard } from "../../utils/selectMarkdown";
 import { emitHostEvent, hasRaftHostEventBridge, readRaftHostOnboardingContext } from "../../embed/hostBridge";
 import { NATIVE_ONBOARDING_CONTRACT_VERSION } from "../../embed/nativeOnboarding";
 import {
@@ -448,7 +449,7 @@ export default function ServerSetupProjectionGate({
 
   // Copying says so where the click happened: the button turns into a tick.
   const handleCopyInstallCommand = async (_runtimeId: string, command: string) => {
-    await navigator.clipboard.writeText(command).catch(() => undefined);
+    await copyTextToClipboard(command).catch(() => undefined);
   };
 
   const serverUrl = getServerUrl();

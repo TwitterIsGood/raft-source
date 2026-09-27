@@ -15,7 +15,11 @@ interface GravatarAvatarProps {
   iconSize?: number;
 }
 
-async function sha256Hex(message: string): Promise<string> {
+async function sha256Hex(message: string): Promise<string | null> {
+  // `crypto.subtle` is secure-context-only, so a plain-HTTP origin has none and
+  // there is no digest to derive. The caller treats a null hash exactly like an
+  // absent `gravatarHash` and renders the placeholder icon.
+  if (typeof crypto.subtle === "undefined") return null;
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(message));
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }

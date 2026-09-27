@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useIntl } from "react-intl";
 import type { MessageId } from "../../i18n/messages";
 import { CenteredCardBrandHeader } from "./CenteredCardFrame";
+import { copyTextToClipboard } from "../../utils/selectMarkdown";
 
 export default function OpenInBrowserSignInGuide({
   loginUrl,
@@ -17,7 +18,7 @@ export default function OpenInBrowserSignInGuide({
 
   const copyLink = async () => {
     try {
-      await navigator.clipboard.writeText(loginUrl);
+      await copyTextToClipboard(loginUrl);
       setCopyStatus("auth.openInBrowser.copied");
     } catch {
       setCopyStatus("auth.openInBrowser.copyFailed");
