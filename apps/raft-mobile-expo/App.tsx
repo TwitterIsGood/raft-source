@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, FlatList, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, AppState, FlatList, Image, KeyboardAvoidingView, Linking, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { getChannel, getChannels, getDMs, getMessages, getOrCreateThread, getServers, login, logoutRemote, sendMessage } from "./src/api";
+import { forgotPassword, getChannel, getChannels, getDMs, getMessages, getOrCreateThread, getServers, login, logoutRemote, register, sendMessage } from "./src/api";
 import { clearSession, readSession } from "./src/session";
 import { registerForPush, subscribeToNotificationTap, unregisterForPush } from "./src/push";
 import { createRaftSocket } from "./src/socket";
@@ -14,12 +14,17 @@ const displayName = (channel: Channel) => channel.type === "dm" ? channel.peerDi
 const normalize = (m: any): Message => ({ id: m.id, seq: m.seq, channelId: m.channelId, senderType: m.senderType, senderId: m.senderId, senderName: m.senderName || "Raft", content: m.content || "", createdAt: m.createdAt || new Date().toISOString(), messageType: m.messageType });
 
 type ViewMode = "servers" | "conversations" | "chat";
+type AuthMode = "login" | "register" | "forgot";
 
 export default function App() {
   const [ready, setReady] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [acceptedLegal, setAcceptedLegal] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [servers, setServers] = useState<Server[]>([]);
   const [server, setServer] = useState<Server | null>(null);
@@ -202,7 +207,18 @@ export default function App() {
       }
     } catch (e) { report(e); } finally { loadingOlder.current = false; }
   };
-  const submitLogin = async () => { setError(null); try { await login(email.trim(), password); setLoggedIn(true); } catch (e) { report(e); } };
+  const switchAuth = (next: AuthMode) => { setAuthMode(next); setError(null); setForgotSent(false); };
+  const submitLogin = async () => {
+    setError(null); setAuthBusy(true);
+    try {
+      if (authMode === "login") { await login(email.trim(), password); setLoggedIn(true); }
+      else if (authMode === "register") {
+        if (!acceptedLegal) throw new Error("创建账号前需要同意服务条款并确认隐私政策。");
+        await register(email.trim(), password); setLoggedIn(true);
+      } else { await forgotPassword(email.trim()); setForgotSent(true); }
+    } catch (e) { report(e); }
+    finally { setAuthBusy(false); }
+  };
   const logout = async () => {
     const currentServer = server;
     try {
@@ -246,7 +262,32 @@ export default function App() {
   const title = useMemo(() => active ? displayName(active) : "消息", [active]);
 
   if (!ready) return <View style={styles.center}><ActivityIndicator color={color.blue} /></View>;
-  if (!loggedIn) return <SafeAreaView style={styles.safe}><StatusBar style="dark" /><View style={styles.login}><Text style={styles.brand}>Raft</Text><Text style={styles.loginTitle}>登录你的工作区</Text><TextInput value={email} onChangeText={setEmail} placeholder="邮箱" autoCapitalize="none" keyboardType="email-address" textContentType="username" style={styles.input} /><TextInput value={password} onChangeText={setPassword} placeholder="密码" secureTextEntry textContentType="password" style={styles.input} /><Pressable style={styles.primary} onPress={() => void submitLogin()}><Text style={styles.primaryLabel}>登录</Text></Pressable>{error ? <Text style={styles.error}>{error}</Text> : null}</View></SafeAreaView>;
+  if (!loggedIn) {
+    const title = authMode === "login" ? "登录" : authMode === "register" ? "创建你的账号" : forgotSent ? "请查收邮件" : "重置密码";
+    return <SafeAreaView style={styles.authShell}><StatusBar style="dark" />
+      <View style={styles.authTopBar}><Image source={require("./assets/raft-logo.png")} style={styles.authLogo} resizeMode="contain" /></View>
+      <KeyboardAvoidingView style={styles.authFlex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView contentContainerStyle={styles.authContent} keyboardShouldPersistTaps="handled">
+          <View style={styles.authForm}>
+            <Text style={styles.authTitle}>{title}</Text>
+            {authMode === "forgot" && !forgotSent ? <Text style={styles.authDescription}>输入你的邮箱，我们会发送重置密码的链接。</Text> : null}
+            {forgotSent ? <Text style={styles.authDescription}>如果 {email} 已注册，我们已发送密码重置链接。</Text> : null}
+            {error ? <View style={styles.authBanner}><Text style={styles.authBannerText}>{error}</Text></View> : null}
+            {!forgotSent ? <>
+              <View style={styles.authField}><Text style={styles.authLabel}>邮箱</Text><TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" textContentType="username" autoComplete="email" style={styles.authInput} /></View>
+              {authMode !== "forgot" ? <View style={styles.authField}><Text style={styles.authLabel}>密码</Text><TextInput value={password} onChangeText={setPassword} placeholder={authMode === "register" ? "至少 8 个字符" : undefined} secureTextEntry textContentType={authMode === "register" ? "newPassword" : "password"} autoComplete={authMode === "register" ? "password-new" : "password"} style={styles.authInput} /></View> : null}
+              {authMode === "register" ? <Pressable style={styles.legalRow} onPress={() => setAcceptedLegal((value) => !value)}><View style={[styles.checkbox, acceptedLegal && styles.checkboxChecked]}>{acceptedLegal ? <Text style={styles.checkmark}>✓</Text> : null}</View><Text style={styles.legalText}>我同意服务条款并确认隐私政策。</Text></Pressable> : null}
+              <Pressable style={[styles.authPrimary, (authBusy || (authMode === "register" && !acceptedLegal)) && styles.authDisabled]} disabled={authBusy || (authMode === "register" && !acceptedLegal)} onPress={() => void submitLogin()}><Text style={styles.authPrimaryText}>{authBusy ? authMode === "forgot" ? "发送中…" : authMode === "register" ? "创建账号中…" : "登录中…" : authMode === "forgot" ? "发送重置链接" : authMode === "register" ? "继续" : "登录"}</Text></Pressable>
+            </> : null}
+            {authMode === "login" ? <><Pressable onPress={() => switchAuth("forgot")}><Text style={styles.authLink}>忘记密码？</Text></Pressable><Text style={styles.authPrompt}>还没有账号？<Text style={styles.authLinkInline} onPress={() => switchAuth("register")}>创建一个</Text></Text></> : null}
+            {authMode === "register" ? <Text style={styles.authPrompt}>已有账号？<Text style={styles.authLinkInline} onPress={() => switchAuth("login")}>登录</Text></Text> : null}
+            {authMode === "forgot" ? <Pressable onPress={() => switchAuth("login")}><Text style={styles.authLink}>返回登录</Text></Pressable> : null}
+            {authMode !== "forgot" ? <Text style={styles.legalAgreement}>继续即表示你同意 <Text style={styles.authLinkInline} onPress={() => void Linking.openURL("https://raft.build/terms")}>服务条款</Text> 和 <Text style={styles.authLinkInline} onPress={() => void Linking.openURL("https://raft.build/privacy")}>隐私政策</Text>。</Text> : null}
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>;
+  }
   return <SafeAreaView style={styles.safe}><StatusBar style="dark" />
     <View style={styles.header}><Pressable onPress={back}><Text style={styles.headerAction}>{mode === "chat" ? threadParent ? "‹ 频道" : "‹ 消息" : mode === "servers" ? "‹ 返回" : "工作区"}</Text></Pressable><Text numberOfLines={1} style={styles.headerTitle}>{mode === "chat" ? title : server?.name || "Raft"}</Text><Pressable onPress={() => void logout()}><Text style={styles.headerAction}>退出</Text></Pressable></View>
     {error ? <Pressable onPress={() => setError(null)} style={styles.errorBar}><Text numberOfLines={2} style={styles.error}>{error}</Text></Pressable> : null}
@@ -257,4 +298,9 @@ export default function App() {
   </SafeAreaView>;
 }
 
-const styles = StyleSheet.create({ safe: { flex: 1, backgroundColor: color.white }, center: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 160 }, login: { flex: 1, justifyContent: "center", padding: 28 }, brand: { fontSize: 42, fontWeight: "800", color: color.blue }, loginTitle: { fontSize: 24, fontWeight: "700", color: color.ink, marginTop: 10, marginBottom: 24 }, input: { borderWidth: 1, borderColor: color.line, borderRadius: 12, padding: 14, marginBottom: 12, fontSize: 16 }, primary: { backgroundColor: color.blue, padding: 15, borderRadius: 12, alignItems: "center" }, primaryLabel: { color: color.white, fontSize: 16, fontWeight: "700" }, error: { color: "#B91C1C", fontSize: 13 }, errorBar: { backgroundColor: "#FEF2F2", padding: 8 }, header: { height: 54, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: color.line, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, headerAction: { color: color.blue, fontSize: 14, minWidth: 54 }, headerTitle: { color: color.ink, fontSize: 17, fontWeight: "700", maxWidth: "52%" }, listPad: { paddingBottom: 20 }, conversationRow: { minHeight: 68, justifyContent: "center", borderBottomWidth: 1, borderBottomColor: color.line, paddingHorizontal: 18 }, rowTitle: { color: color.ink, fontSize: 16, fontWeight: "600" }, muted: { color: color.muted, fontSize: 12, marginTop: 3 }, chat: { flex: 1 }, threadParent: { padding: 10, backgroundColor: color.bg, borderBottomWidth: 1, borderBottomColor: color.line }, messages: { paddingHorizontal: 14, paddingTop: 14, paddingBottom: 8 }, message: { padding: 10, marginBottom: 8, borderRadius: 12, backgroundColor: color.bg }, messageHeader: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }, sender: { color: color.ink, fontSize: 13, fontWeight: "700" }, time: { color: color.muted, fontSize: 11 }, content: { color: color.ink, fontSize: 16, lineHeight: 23 }, composer: { flexDirection: "row", alignItems: "flex-end", borderTopWidth: 1, borderTopColor: color.line, padding: 10, gap: 8, backgroundColor: color.white }, composerInput: { flex: 1, maxHeight: 140, minHeight: 44, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: color.line, fontSize: 16, color: color.ink }, send: { minHeight: 44, justifyContent: "center", paddingHorizontal: 14, backgroundColor: color.blue, borderRadius: 12 }, disabled: { opacity: 0.4 }, sendLabel: { color: color.white, fontWeight: "700" }, notice: { position: "absolute", bottom: 92, left: 12, right: 12, padding: 12, borderRadius: 10, backgroundColor: color.ink }, noticeText: { color: color.white } });
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: color.white }, center: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 160 },
+  authShell: { flex: 1, backgroundColor: "#FFFFFF" }, authFlex: { flex: 1 }, authTopBar: { height: 58, backgroundColor: "#FFD440", borderBottomWidth: 2, borderBottomColor: "#141111", paddingHorizontal: 20, justifyContent: "center" }, authLogo: { width: 118, height: 30 }, authContent: { flexGrow: 1, justifyContent: "center", paddingHorizontal: 20, paddingVertical: 40 }, authForm: { width: "100%", maxWidth: 420, alignSelf: "center" }, authTitle: { color: "#141111", fontSize: 24, fontWeight: "700", textAlign: "center", marginBottom: 20 }, authDescription: { color: "#141111", opacity: 0.6, fontSize: 14, lineHeight: 20, textAlign: "center", marginTop: -8, marginBottom: 20 }, authBanner: { backgroundColor: "#FFF0E8", borderWidth: 2, borderColor: "#141111", padding: 10, marginBottom: 16 }, authBannerText: { color: "#141111", fontSize: 13, fontWeight: "700" }, authField: { marginBottom: 16 }, authLabel: { color: "#141111", fontSize: 14, fontWeight: "700", marginBottom: 5 }, authInput: { minHeight: 44, borderWidth: 2, borderColor: "#141111", paddingHorizontal: 10, paddingVertical: 8, fontSize: 16, color: "#141111", backgroundColor: "#FFFFFF", shadowColor: "#141111", shadowOffset: { width: 2, height: 2 }, shadowOpacity: 1, shadowRadius: 0, elevation: 2 }, authPrimary: { minHeight: 48, backgroundColor: "#FE7DA8", borderWidth: 2, borderColor: "#141111", alignItems: "center", justifyContent: "center", shadowColor: "#141111", shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0, elevation: 4, marginTop: 2, marginBottom: 18 }, authPrimaryText: { color: "#141111", fontSize: 15, fontWeight: "700" }, authDisabled: { opacity: 0.45 }, authLink: { color: "#141111", fontSize: 14, fontWeight: "700", textAlign: "center", textDecorationLine: "underline", marginBottom: 14 }, authPrompt: { color: "#141111", fontSize: 14, textAlign: "center", marginBottom: 12 }, authLinkInline: { color: "#FE7DA8", fontWeight: "700", textDecorationLine: "underline" }, legalAgreement: { color: "#141111", opacity: 0.6, fontSize: 12, lineHeight: 18, textAlign: "center", marginTop: 4 },
+  legalRow: { flexDirection: "row", alignItems: "center", marginBottom: 16 }, checkbox: { width: 22, height: 22, borderWidth: 2, borderColor: "#141111", marginRight: 8, alignItems: "center", justifyContent: "center" }, checkboxChecked: { backgroundColor: "#FFD440" }, checkmark: { color: "#141111", fontWeight: "800" }, legalText: { flex: 1, color: "#141111", fontSize: 13 }, error: { color: "#B91C1C", fontSize: 13 }, errorBar: { backgroundColor: "#FEF2F2", padding: 8 },
+  header: { height: 54, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: color.line, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, headerAction: { color: color.blue, fontSize: 14, minWidth: 54 }, headerTitle: { color: color.ink, fontSize: 17, fontWeight: "700", maxWidth: "52%" }, listPad: { paddingBottom: 20 }, conversationRow: { minHeight: 68, justifyContent: "center", borderBottomWidth: 1, borderBottomColor: color.line, paddingHorizontal: 18 }, rowTitle: { color: color.ink, fontSize: 16, fontWeight: "600" }, muted: { color: color.muted, fontSize: 12, marginTop: 3 }, chat: { flex: 1 }, threadParent: { padding: 10, backgroundColor: color.bg, borderBottomWidth: 1, borderBottomColor: color.line }, messages: { paddingHorizontal: 14, paddingTop: 14, paddingBottom: 8 }, message: { padding: 10, marginBottom: 8, borderRadius: 12, backgroundColor: color.bg }, messageHeader: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }, sender: { color: color.ink, fontSize: 13, fontWeight: "700" }, time: { color: color.muted, fontSize: 11 }, content: { color: color.ink, fontSize: 16, lineHeight: 23 }, composer: { flexDirection: "row", alignItems: "flex-end", borderTopWidth: 1, borderTopColor: color.line, padding: 10, gap: 8, backgroundColor: color.white }, composerInput: { flex: 1, maxHeight: 140, minHeight: 44, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: color.line, fontSize: 16, color: color.ink }, send: { minHeight: 44, justifyContent: "center", paddingHorizontal: 14, backgroundColor: color.blue, borderRadius: 12 }, disabled: { opacity: 0.4 }, sendLabel: { color: color.white, fontWeight: "700" }, notice: { position: "absolute", bottom: 92, left: 12, right: 12, padding: 12, borderRadius: 10, backgroundColor: color.ink }, noticeText: { color: color.white }
+});

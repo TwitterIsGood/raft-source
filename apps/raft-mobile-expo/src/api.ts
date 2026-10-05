@@ -61,6 +61,29 @@ export async function login(email: string, password: string) {
   return result;
 }
 
+export async function register(email: string, password: string) {
+  const result = await raw<{ accessToken: string; refreshToken: string; user: unknown }>("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({
+      email,
+      password,
+      acceptTerms: true,
+      termsVersion: "2026-05-12",
+      privacyVersion: "2026-05-12",
+      legalAcceptanceSource: "signup",
+    }),
+  });
+  await saveSession(result.accessToken, result.refreshToken);
+  return result;
+}
+
+export async function forgotPassword(email: string) {
+  return raw<{ ok: boolean; message: string }>("/api/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
 export async function logoutRemote() {
   const { refreshToken } = await readSession();
   if (!refreshToken) return;
