@@ -18,7 +18,7 @@ async function raw<T>(path: string, init: RequestInit = {}, token?: string, serv
   return response.status === 204 ? (undefined as T) : response.json() as Promise<T>;
 }
 
-async function refreshAccessToken(): Promise<string | null> {
+export async function refreshAccessToken(): Promise<string | null> {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
     const { refreshToken } = await readSession();
@@ -59,6 +59,15 @@ export async function login(email: string, password: string) {
   });
   await saveSession(result.accessToken, result.refreshToken);
   return result;
+}
+
+export async function logoutRemote() {
+  const { refreshToken } = await readSession();
+  if (!refreshToken) return;
+  await raw<{ ok: boolean }>("/api/auth/logout", {
+    method: "POST",
+    body: JSON.stringify({ refreshToken }),
+  });
 }
 
 export async function getServers() { return api<ServerResponse[]>("/api/servers"); }

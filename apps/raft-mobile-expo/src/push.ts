@@ -39,13 +39,27 @@ export async function registerForPush(serverId: string): Promise<boolean> {
   return true;
 }
 
+export async function unregisterForPush(serverId: string): Promise<void> {
+  const installationId = await getInstallationId();
+  await api(`/api/push/registrations/${encodeURIComponent(installationId)}`, {
+    method: "DELETE",
+  }, serverId);
+}
+
+let consumedLastResponseId: string | null = null;
 export function subscribeToNotificationTap(onTap: (data: Record<string, unknown>) => void) {
   let cancelled = false;
   void Notifications.getLastNotificationResponseAsync().then((response) => {
+    const responseId = response?.notification.request.identifier;
+    if (responseId && responseId === consumedLastResponseId) return;
+    if (responseId) consumedLastResponseId = responseId;
     const data = response?.notification.request.content.data;
     if (!cancelled && data && typeof data === "object") onTap(data as Record<string, unknown>);
   });
   const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+    const responseId = response.notification.request.identifier;
+    if (responseId && responseId === consumedLastResponseId) return;
+    if (responseId) consumedLastResponseId = responseId;
     const data = response.notification.request.content.data;
     if (data && typeof data === "object") onTap(data as Record<string, unknown>);
   });
