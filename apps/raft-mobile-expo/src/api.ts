@@ -1,0 +1,84 @@
+import { API_BASE_URL } from "./config";
+import { clearSession, readSession, saveSession } from "./session";
+
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function raw<T>(path: string, init: RequestInit = {}, token?: string, serverId?: string): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set("Content-Type", "application/json");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (serverId) headers.set("X-Server-Id", serverId);
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  if (!response.ok) {
+    const body = await response.text();
+    const error = new Error(body || `Request failed (${response.status})`) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
+  return response.status === 204 ? (undefined as T) : response.json() as Promise<T>;
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    const { refreshToken } = await readSession();
+    if (!refreshToken) return null;
+    try {
+      const result = await raw<{ accessToken: string; refreshToken: string }>("/api/auth/refresh", {
+        method: "POST",
+        body: JSON.stringify({ refreshToken }),
+      });
+      await saveSession(result.accessToken, result.refreshToken);
+      return result.accessToken;
+    } catch {
+      await clearSession();
+      return null;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
+export async function api<T>(path: string, init: RequestInit = {}, serverId?: string): Promise<T> {
+  const { accessToken } = await readSession();
+  try {
+    return await raw<T>(path, init, accessToken ?? undefined, serverId);
+  } catch (error) {
+    if ((error as { status?: number }).status !== 401 || path.startsWith("/api/auth/")) throw error;
+    const token = await refreshAccessToken();
+    if (!token) throw error;
+    return raw<T>(path, init, token, serverId);
+  }
+}
+
+export async function login(email: string, password: string) {
+  const result = await raw<{ accessToken: string; refreshToken: string; user: unknown }>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+  await saveSession(result.accessToken, result.refreshToken);
+  return result;
+}
+
+export async function getServers() { return api<ServerResponse[]>("/api/servers"); }
+export async function getChannels(serverId: string) { return api<ChannelResponse[]>("/api/channels", {}, serverId); }
+export async function getDMs(serverId: string) { return api<ChannelResponse[]>("/api/channels/dm", {}, serverId); }
+export async function getChannel(serverId: string, channelId: string) { return api<ChannelResponse>(`/api/channels/${channelId}`, {}, serverId); }
+export async function getMessages(serverId: string, channelId: string, before?: number) {
+  const cursor = before ? `&before=${before}` : "";
+  return api<{ messages: MessageResponse[]; historyLimited?: boolean }>(`/api/messages/channel/${channelId}?limit=50${cursor}`, {}, serverId);
+}
+export async function getOrCreateThread(serverId: string, channelId: string, parentMessageId: string) {
+  return api<{ threadChannelId: string }>(`/api/channels/${channelId}/threads`, { method: "POST", body: JSON.stringify({ parentMessageId }) }, serverId);
+}
+export async function sendMessage(serverId: string, channelId: string, content: string) {
+  return api<MessageResponse>("/api/messages", {
+    method: "POST",
+    body: JSON.stringify({ channelId, content, randomId: `ios-${Date.now()}-${Math.random().toString(36).slice(2)}` }),
+  }, serverId);
+}
+
+export type ServerResponse = { id: string; name: string; slug: string; avatarUrl?: string | null; role?: string };
+export type ChannelResponse = { id: string; name?: string | null; type?: string; serverId: string; joined?: boolean; archivedAt?: string | null; peerName?: string; peerDisplayName?: string | null };
+export type MessageResponse = { id: string; seq?: number; channelId: string; senderType?: string; senderId?: string; senderName?: string; content: string; createdAt: string; updatedAt?: string; messageType?: string };

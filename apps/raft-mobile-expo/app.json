@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Raft",
+    "slug": "raft-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "raft",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.twitterisgood.raft.mobile",
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"]
+      }
+    },
+    "plugins": [
+      "expo-notifications",
+      "expo-secure-store"
+    ],
+    "extra": {
+      "apiBaseUrl": "https://bj1.v.lhb.ink:63204"
+    }
+  }
+}
