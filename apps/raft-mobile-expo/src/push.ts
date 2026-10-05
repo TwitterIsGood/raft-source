@@ -4,6 +4,7 @@ import Constants from "expo-constants";
 import { api } from "./api";
 import { APP_ENV } from "./config";
 import { getInstallationId } from "./session";
+import { NotificationResponseDeduper } from "./behavior";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: true }),
@@ -46,20 +47,18 @@ export async function unregisterForPush(serverId: string): Promise<void> {
   }, serverId);
 }
 
-let consumedLastResponseId: string | null = null;
+const responseDeduper = new NotificationResponseDeduper();
 export function subscribeToNotificationTap(onTap: (data: Record<string, unknown>) => void) {
   let cancelled = false;
   void Notifications.getLastNotificationResponseAsync().then((response) => {
     const responseId = response?.notification.request.identifier;
-    if (responseId && responseId === consumedLastResponseId) return;
-    if (responseId) consumedLastResponseId = responseId;
+    if (!responseDeduper.accept(responseId)) return;
     const data = response?.notification.request.content.data;
     if (!cancelled && data && typeof data === "object") onTap(data as Record<string, unknown>);
   });
   const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
     const responseId = response.notification.request.identifier;
-    if (responseId && responseId === consumedLastResponseId) return;
-    if (responseId) consumedLastResponseId = responseId;
+    if (!responseDeduper.accept(responseId)) return;
     const data = response.notification.request.content.data;
     if (data && typeof data === "object") onTap(data as Record<string, unknown>);
   });

@@ -9,7 +9,7 @@
     "prebuild": "expo prebuild --platform ios",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/messageCache.test.mjs",
+    "test": "node --experimental-strip-types --test src/*.test.mjs",
     "android": "expo run:android"
   },
   "dependencies": {

@@ -6,6 +6,7 @@ import { clearSession, readSession } from "./src/session";
 import { registerForPush, subscribeToNotificationTap, unregisterForPush } from "./src/push";
 import { createRaftSocket } from "./src/socket";
 import { MessageCache } from "./src/messageCache";
+import { completedCursor, isCurrentScope, sendableDraft } from "./src/behavior";
 import type { Channel, Message, Server } from "./src/types";
 
 const color = { ink: "#17212F", muted: "#718096", line: "#E5EAF0", bg: "#F6F8FB", blue: "#365FE8", mine: "#E8EEFF", white: "#FFFFFF" };
@@ -96,7 +97,7 @@ export default function App() {
       if (closed) return;
       messageCacheRef.current.merge(server.id, [row]);
       const next = messageCacheRef.current.get(server.id, row.channelId);
-      if (serverRef.current?.id === server.id && activeRef.current?.id === row.channelId) setMessages(next);
+      if (isCurrentScope({ serverId: server.id, channelId: row.channelId }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null)) setMessages(next);
     };
     const syncServer = async () => {
       if (syncingServerRef.current.has(server.id)) return;
@@ -124,7 +125,7 @@ export default function App() {
       if (typeof payload.body === "string") setNotice(payload.body);
     }, (currentSeq, hasMore) => {
       // Advance only after the server confirms the final ordered page.
-      if (!hasMore) serverCursorRef.current.set(server.id, Math.max(serverCursorRef.current.get(server.id) ?? 0, currentSeq));
+      serverCursorRef.current.set(server.id, completedCursor(serverCursorRef.current.get(server.id) ?? 0, currentSeq, hasMore));
     }, (serverSeq) => {
       if (serverSeq > (checkedServerSeqRef.current.get(server.id) ?? 0)) {
         void syncServer().then(() => checkedServerSeqRef.current.set(server.id, serverSeq));
@@ -148,7 +149,7 @@ export default function App() {
       const rows = result.messages.map(normalize);
       messageCacheRef.current.merge(serverId, rows);
       const next = messageCacheRef.current.get(serverId, channelId);
-      if (requestId === activeRequestRef.current && serverRef.current?.id === serverId && activeRef.current?.id === channelId) {
+      if (requestId === activeRequestRef.current && isCurrentScope({ serverId, channelId }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null)) {
         setMessages(next);
         setHasOlder(rows.length >= 50 && !result.historyLimited);
         setLoading(false);
@@ -195,7 +196,7 @@ export default function App() {
       const rows = result.messages.map(normalize);
       messageCacheRef.current.merge(serverId, rows);
       const next = messageCacheRef.current.get(serverId, channelId);
-      if (requestId === activeRequestRef.current && serverRef.current?.id === serverId && activeRef.current?.id === channelId) {
+      if (requestId === activeRequestRef.current && isCurrentScope({ serverId, channelId }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null)) {
         setMessages(next);
         setHasOlder(rows.length >= 50 && !result.historyLimited);
       }
@@ -220,7 +221,7 @@ export default function App() {
     setActive(null);
   };
   const submitMessage = async () => {
-    const content = draft.trim();
+    const content = sendableDraft(draft);
     if (!content || !server || !active || sending) return;
     const serverId = server.id;
     const channelId = active.id;
@@ -230,16 +231,16 @@ export default function App() {
       const row = normalize((response as any).message ?? response);
       messageCacheRef.current.merge(serverId, [row]);
       const next = messageCacheRef.current.get(serverId, channelId);
-      if (serverRef.current?.id === serverId && activeRef.current?.id === channelId) { setMessages(next); list.current?.scrollToOffset({ offset: 0, animated: true }); }
+      if (isCurrentScope({ serverId, channelId }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null)) { setMessages(next); list.current?.scrollToOffset({ offset: 0, animated: true }); }
     }
-    catch (e) { if (serverRef.current?.id === serverId && activeRef.current?.id === channelId) setDraft(content); report(e); }
+    catch (e) { if (isCurrentScope({ serverId, channelId }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null)) setDraft(content); report(e); }
     finally { setSending(false); }
   };
   const openThread = async (parent: Message) => {
     if (!server || !active || active.type === "thread") return;
     const serverId = server.id;
     const origin = active;
-    try { const result = await getOrCreateThread(serverId, origin.id, parent.id); if (serverRef.current?.id !== serverId || activeRef.current?.id !== origin.id) return; setThreadOrigin(origin); open({ id: result.threadChannelId, name: `回复 · ${displayName(origin)}`, type: "thread", serverId }, parent); }
+    try { const result = await getOrCreateThread(serverId, origin.id, parent.id); if (!isCurrentScope({ serverId, channelId: origin.id }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null)) return; setThreadOrigin(origin); open({ id: result.threadChannelId, name: `回复 · ${displayName(origin)}`, type: "thread", serverId }, parent); }
     catch (e) { report(e); }
   };
   const title = useMemo(() => active ? displayName(active) : "消息", [active]);
