@@ -2,6 +2,8 @@ export type AsyncScope = {
   epoch: number;
   serverId: string;
   channelId: string;
+  /** Optional navigation/composer operation id for repeated A→B→A scopes. */
+  operation?: number;
 };
 
 export type ComposerSnapshot = {
@@ -12,7 +14,8 @@ export type ComposerSnapshot = {
 export function isCurrentAsyncScope(expected: AsyncScope, current: AsyncScope | null): boolean {
   return current?.epoch === expected.epoch
     && current.serverId === expected.serverId
-    && current.channelId === expected.channelId;
+    && current.channelId === expected.channelId
+    && (expected.operation === undefined || current.operation === expected.operation);
 }
 
 export function canClearComposerAfterSend(
