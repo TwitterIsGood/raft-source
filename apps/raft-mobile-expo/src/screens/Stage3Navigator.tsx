@@ -43,7 +43,7 @@ function MembersPanel({ serverId }: Props) {
 
 function ComputersPanel({ serverId }: Props) {
   const [rows, setRows] = useState<MobileComputer[]>([]); const [error, setError] = useState<string | null>(null);
-  useEffect(() => { let cancelled = false; getServerComputers(serverId).then((result) => { if (!cancelled) setRows(result.machines ?? []); }).catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); }); return () => { cancelled = true; }; }, [serverId]);
+  useEffect(() => { let cancelled = false; getServerComputers(serverId).then((result) => { if (!cancelled) setRows(result); }).catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); }); return () => { cancelled = true; }; }, [serverId]);
   return <View style={styles.panel}><Text style={styles.title}>电脑</Text><ErrorText message={error} /><FlatList data={rows} keyExtractor={(item) => item.id} contentContainerStyle={styles.list} ListEmptyComponent={<Text style={styles.empty}>暂无电脑</Text>} renderItem={({ item }) => <View style={styles.card}><Text style={styles.cardTitle}>{item.name}</Text><Text style={styles.meta}>{item.status} · {item.os || "系统未知"}</Text>{item.hostname ? <Text style={styles.bodyText}>{item.hostname}</Text> : null}</View>} /></View>;
 }
 

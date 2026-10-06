@@ -66,6 +66,7 @@ export function getWikiPage(serverId: string, artifactId: string): Promise<WikiP
 export function getServerMembers(serverId: string): Promise<MobileMember[]> {
   return api(`/api/servers/${encodeURIComponent(serverId)}/members`, {}, serverId);
 }
-export function getServerComputers(serverId: string): Promise<{ machines: MobileComputer[] }> {
-  return api(`/api/servers/${encodeURIComponent(serverId)}/machines`, {}, serverId);
+export async function getServerComputers(serverId: string): Promise<MobileComputer[]> {
+  const response = await api<MobileComputer[] | { machines?: MobileComputer[] }>(`/api/servers/${encodeURIComponent(serverId)}/machines`, {}, serverId);
+  return Array.isArray(response) ? response : response.machines ?? [];
 }
