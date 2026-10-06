@@ -1,4 +1,5 @@
 import { api } from "./api";
+export { formatStage2Date } from "./stage2Format";
 
 export type Stage2SearchSort = "relevance" | "recent";
 export type Stage2SenderType = "user" | "agent";
@@ -163,12 +164,6 @@ function queryString(values: Record<string, string | number | undefined>): strin
   for (const [key, value] of Object.entries(values)) if (value !== undefined && value !== "") query.set(key, String(value));
   const encoded = query.toString();
   return encoded ? `?${encoded}` : "";
-}
-
-export function formatStage2Date(value: unknown): string {
-  if (typeof value !== "string" && typeof value !== "number") return "时间未知";
-  const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toLocaleString() : "时间未知";
 }
 
 /** GET /api/messages/search — Web-compatible search contract. */

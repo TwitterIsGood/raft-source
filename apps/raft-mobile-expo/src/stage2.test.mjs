@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatStage2Date } from "./stage2Api.ts";
+import { formatStage2Date } from "./stage2Format.ts";
 import { createStage2Navigation, navigateStage2, stage2RouteTitle, isStage2Route, STAGE2_ROUTES } from "./stage2Navigation.ts";
 
  test("stage2 navigation starts at activity and changes only route", () => {
