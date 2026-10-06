@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
-import { getActivityInbox, type ActivityFilter, type ActivityInboxRow } from "../stage2Api";
+import { formatStage2Date, getActivityInbox, type ActivityFilter, type ActivityInboxRow } from "../stage2Api";
 
 type Props = { serverId: string; onOpenRow?: (row: ActivityInboxRow) => void };
 
@@ -21,7 +21,7 @@ export function ActivityScreen({ serverId, onOpenRow }: Props) {
     <View style={styles.filters}>{(["all", "unread", "mentions"] as const).map((item) => <Pressable key={item} onPress={() => setFilter(item)} accessibilityRole="button"><Text style={[styles.filter, item === filter && styles.selected]}>{item === "all" ? "全部" : item === "unread" ? "未读" : "提及"}</Text></Pressable>)}</View>
     {error ? <Text style={styles.error}>{error}</Text> : null}
     {busy && !rows.length ? <ActivityIndicator style={styles.loading} /> : null}
-    <FlatList data={rows} keyExtractor={(item) => item.kind === "thread" ? `thread:${item.threadChannelId}` : `${item.kind}:${item.channelId}`} contentContainerStyle={styles.list} renderItem={({ item }) => <Pressable style={styles.card} onPress={() => onOpenRow?.(item)} accessibilityRole="button"><View style={styles.rowHeader}><Text style={styles.name}>{item.channelName || item.parentChannelName || "动态"}</Text>{item.unreadCount > 0 ? <Text style={styles.badge}>{item.unreadCount}</Text> : null}</View><Text style={styles.preview}>{item.lastMessagePreview || item.latestActivityPreview || item.parentMessagePreview || "有新动态"}</Text><Text style={styles.time}>{new Date(item.lastActivityAt || item.lastMessageAt || new Date().toISOString()).toLocaleString()}</Text></Pressable>} ListEmptyComponent={!busy ? <Text style={styles.empty}>暂无动态</Text> : null} />
+    <FlatList data={rows} keyExtractor={(item) => item.kind === "thread" ? `thread:${item.threadChannelId}` : `${item.kind}:${item.channelId}`} contentContainerStyle={styles.list} renderItem={({ item }) => <Pressable style={styles.card} onPress={() => onOpenRow?.(item)} accessibilityRole="button"><View style={styles.rowHeader}><Text style={styles.name}>{item.channelName || item.parentChannelName || "动态"}</Text>{item.unreadCount > 0 ? <Text style={styles.badge}>{item.unreadCount}</Text> : null}</View><Text style={styles.preview}>{item.lastMessagePreview || item.latestActivityPreview || item.parentMessagePreview || "有新动态"}</Text><Text style={styles.time}>{formatStage2Date(item.lastActivityAt || item.lastMessageAt)}</Text></Pressable>} ListEmptyComponent={!busy ? <Text style={styles.empty}>暂无动态</Text> : null} />
   </View>;
 }
 

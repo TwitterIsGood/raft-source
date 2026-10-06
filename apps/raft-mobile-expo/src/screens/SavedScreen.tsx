@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import { getSavedMessages, unsaveMessage, type SavedMessage } from "../stage2Api";
+import { formatStage2Date, getSavedMessages, unsaveMessage, type SavedMessage } from "../stage2Api";
 
 type Props = { serverId: string; onOpenMessage?: (item: SavedMessage) => void };
 
@@ -22,7 +22,7 @@ export function SavedScreen({ serverId, onOpenMessage }: Props) {
     <TextInput value={query} onChangeText={setQuery} onSubmitEditing={() => void load()} placeholder="筛选已保存消息" style={styles.input} accessibilityLabel="筛选已保存消息" />
     {error ? <Text style={styles.error}>{error}</Text> : null}
     {busy && !rows.length ? <ActivityIndicator style={styles.loading} /> : null}
-    <FlatList data={rows} keyExtractor={(item) => item.messageId} contentContainerStyle={styles.list} renderItem={({ item }) => <Pressable style={styles.card} onPress={() => onOpenMessage?.(item)} accessibilityRole="button"><Text style={styles.meta}>{item.channelName} · {item.senderName || "Raft"}</Text><Text style={styles.content}>{item.content}</Text><View style={styles.footer}><Text style={styles.time}>{new Date(item.savedAt).toLocaleString()}</Text><Pressable onPress={() => void remove(item)} accessibilityRole="button" accessibilityLabel="取消保存"><Text style={styles.remove}>取消保存</Text></Pressable></View></Pressable>} ListEmptyComponent={!busy ? <Text style={styles.empty}>暂无保存消息</Text> : null} />
+    <FlatList data={rows} keyExtractor={(item) => item.messageId} contentContainerStyle={styles.list} renderItem={({ item }) => <Pressable style={styles.card} onPress={() => onOpenMessage?.(item)} accessibilityRole="button"><Text style={styles.meta}>{item.channelName} · {item.senderName || "Raft"}</Text><Text style={styles.content}>{item.content}</Text><View style={styles.footer}><Text style={styles.time}>{formatStage2Date(item.savedAt)}</Text><Pressable onPress={() => void remove(item)} accessibilityRole="button" accessibilityLabel="取消保存"><Text style={styles.remove}>取消保存</Text></Pressable></View></Pressable>} ListEmptyComponent={!busy ? <Text style={styles.empty}>暂无保存消息</Text> : null} />
   </View>;
 }
 
