@@ -9,7 +9,7 @@ export function SearchScreen({ serverId, onOpenMessage }: Props) {
   const [sort, setSort] = useState<Stage2SearchSort>("relevance");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [hasMore, setHasMore] = useState(false);
-  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [savedIds, setSavedIds] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const run = useCallback(async (offset = 0) => {
@@ -21,7 +21,7 @@ export function SearchScreen({ serverId, onOpenMessage }: Props) {
       const ids = response.results.map((item) => item.id);
       if (ids.length) {
         const saved = await checkSavedMessages(serverId, ids);
-        setSavedIds((current) => new Set([...current, ...saved.savedIds]));
+        setSavedIds((current) => { const next = { ...current }; for (const id of saved.savedIds) next[id] = true; return next; });
       }
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
@@ -35,7 +35,7 @@ export function SearchScreen({ serverId, onOpenMessage }: Props) {
     <View style={styles.sortRow}><Pressable onPress={() => setSort("relevance")} accessibilityRole="button"><Text style={[styles.sort, sort === "relevance" && styles.selected]}>相关度</Text></Pressable><Pressable onPress={() => setSort("recent")} accessibilityRole="button"><Text style={[styles.sort, sort === "recent" && styles.selected]}>最近</Text></Pressable></View>
     {error ? <Text style={styles.error}>{error}</Text> : null}
     {busy && !results.length ? <ActivityIndicator style={styles.loading} /> : null}
-    <FlatList data={results} extraData={savedIds} keyExtractor={(item) => item.id} contentContainerStyle={styles.list} onEndReached={() => { if (hasMore && !busy) void run(results.length); }} renderItem={({ item }) => <View style={styles.card}><Pressable onPress={() => onOpenMessage?.(item)} accessibilityRole="button" accessibilityLabel={`打开搜索结果 ${item.channelName} ${item.content}`}><Text style={styles.meta}>{item.channelName} · {item.senderName}</Text><Text style={styles.content}>{item.snippet || item.content}</Text><Text style={styles.time}>{formatStage2Date(item.createdAt)}</Text></Pressable><Pressable style={styles.saveButton} accessibilityRole="button" accessibilityLabel={savedIds.has(item.id) ? "取消保存" : "保存消息"} onPress={async () => { const wasSaved = savedIds.has(item.id); setSavedIds((current) => { const next = new Set(current); if (wasSaved) next.delete(item.id); else next.add(item.id); return next; }); try { if (wasSaved) await unsaveMessage(serverId, item.id); else await saveMessage(serverId, item.id); } catch (cause) { setSavedIds((current) => { const next = new Set(current); if (wasSaved) next.add(item.id); else next.delete(item.id); return next; }); setError(cause instanceof Error ? cause.message : String(cause)); } }}><Text style={styles.saveText}>{savedIds.has(item.id) ? "取消保存" : "保存"}</Text></Pressable></View>} ListEmptyComponent={!busy ? <Text style={styles.empty}>输入关键词开始搜索</Text> : null} />
+    <FlatList data={results} extraData={savedIds} keyExtractor={(item) => `${item.id}:${savedIds[item.id] ? "saved" : "unsaved"}`} contentContainerStyle={styles.list} onEndReached={() => { if (hasMore && !busy) void run(results.length); }} renderItem={({ item }) => <View style={styles.card}><Pressable onPress={() => onOpenMessage?.(item)} accessibilityRole="button" accessibilityLabel={`打开搜索结果 ${item.channelName} ${item.content}`}><Text style={styles.meta}>{item.channelName} · {item.senderName}</Text><Text style={styles.content}>{item.snippet || item.content}</Text><Text style={styles.time}>{formatStage2Date(item.createdAt)}</Text></Pressable><Pressable style={styles.saveButton} accessibilityRole="button" accessibilityLabel={savedIds[item.id] ? "取消保存" : "保存消息"} onPress={async () => { const wasSaved = Boolean(savedIds[item.id]); setSavedIds((current) => ({ ...current, [item.id]: !wasSaved })); try { if (wasSaved) await unsaveMessage(serverId, item.id); else await saveMessage(serverId, item.id); } catch (cause) { setSavedIds((current) => ({ ...current, [item.id]: wasSaved })); setError(cause instanceof Error ? cause.message : String(cause)); } }}><Text style={styles.saveText}>{savedIds[item.id] ? "取消保存" : "保存"}</Text></Pressable></View>} ListEmptyComponent={!busy ? <Text style={styles.empty}>输入关键词开始搜索</Text> : null} />
   </View>;
 }
 
