@@ -16,12 +16,19 @@ export function createSessionStorage(secure: SecureStorage, isolatedSimulator: b
     secureQueue = result.then(() => undefined, () => undefined);
     return result;
   };
+  const settlePair = async <T>(operations: [Promise<T>, Promise<T>]): Promise<[T, T]> => {
+    const settled = await Promise.allSettled(operations);
+    const rejected = settled.find((item): item is PromiseRejectedResult => item.status === "rejected");
+    if (rejected) throw rejected.reason;
+    const fulfilled = settled as [PromiseFulfilledResult<T>, PromiseFulfilledResult<T>];
+    return [fulfilled[0].value, fulfilled[1].value];
+  };
 
   return {
     async read(accessKey: string, refreshKey: string) {
       if (isolatedSimulator) return { accessToken: access, refreshToken: refresh };
       const { accessToken, refreshToken } = await enqueue(async () => {
-        const [accessToken, refreshToken] = await Promise.all([
+        const [accessToken, refreshToken] = await settlePair([
           secure.getItemAsync(accessKey), secure.getItemAsync(refreshKey),
         ]);
         return { accessToken, refreshToken };
@@ -30,14 +37,14 @@ export function createSessionStorage(secure: SecureStorage, isolatedSimulator: b
     },
     async save(accessKey: string, refreshKey: string, accessToken: string, refreshToken: string) {
       if (isolatedSimulator) { access = accessToken; refresh = refreshToken; return; }
-      await enqueue(() => Promise.all([
+      await enqueue(() => settlePair([
         secure.setItemAsync(accessKey, accessToken),
         secure.setItemAsync(refreshKey, refreshToken),
       ]).then(() => undefined));
     },
     async clear(accessKey: string, refreshKey: string) {
       if (isolatedSimulator) { access = null; refresh = null; return; }
-      await enqueue(() => Promise.all([
+      await enqueue(() => settlePair([
         secure.deleteItemAsync(accessKey), secure.deleteItemAsync(refreshKey),
       ]).then(() => undefined));
     },
