@@ -153,7 +153,7 @@ export default function App() {
   const openStage2SavedMessage = (item: SavedMessage) => { void openStage2Channel(item.channelId); };
   const report = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
 
-  useEffect(() => { void readSession().then(({ accessToken }) => { sessionEpochRef.current = getSessionGeneration(); setLoggedIn(Boolean(accessToken)); setReady(true); }); }, []);
+  useEffect(() => { void readSession().then(({ accessToken }) => { sessionEpochRef.current = getSessionGeneration(); setLoggedIn(Boolean(accessToken)); setReady(true); }).catch((cause) => { report(cause); setReady(true); }); }, []);
   useEffect(() => {
     if (!loggedIn) return;
     const epoch = sessionEpochRef.current;

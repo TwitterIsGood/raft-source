@@ -66,6 +66,9 @@ export function getWikiStatus(serverId: string): Promise<WikiStatus> {
 export function getWikiDirectory(serverId: string): Promise<WikiDirectory> {
   return api("/api/wiki/directory", {}, serverId);
 }
+export function refreshWiki(serverId: string): Promise<unknown> {
+  return api("/api/wiki/refresh", { method: "POST" }, serverId);
+}
 export function getWikiPage(serverId: string, artifactId: string): Promise<WikiPage> {
   return api(`/api/wiki/artifacts/${encodeURIComponent(artifactId)}`, {}, serverId);
 }
@@ -75,4 +78,10 @@ export function getServerMembers(serverId: string): Promise<MobileMember[]> {
 export async function getServerComputers(serverId: string): Promise<MobileComputer[]> {
   const response = await api<MobileComputer[] | { machines?: MobileComputer[] }>(`/api/servers/${encodeURIComponent(serverId)}/machines`, {}, serverId);
   return Array.isArray(response) ? response : response.machines ?? [];
+}
+export function updateServerComputer(serverId: string, machineId: string, patch: { name?: string; description?: string | null }): Promise<MobileComputer> {
+  return api(`/api/servers/${encodeURIComponent(serverId)}/machines/${encodeURIComponent(machineId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  }, serverId);
 }
