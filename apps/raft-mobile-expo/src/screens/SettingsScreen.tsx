@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { registerForPush, unregisterForPush } from "../push";
+import { getPushRegistrationState, registerForPush, unregisterForPush, type PushRegistrationState } from "../push";
 import { getCurrentUser, getServerNotificationSettings, updateCurrentUser, updateServerNotificationSettings, type MobileUser, type ServerNotificationSettings, type ServerPushMode } from "../settingsApi";
 
 type Props = {
@@ -23,7 +23,7 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [notificationSettings, setNotificationSettings] = useState<ServerNotificationSettings | null>(null);
-  const [pushState, setPushState] = useState<"unknown" | "enabled" | "unavailable" | "disabled" | "error">("unknown");
+  const [pushState, setPushState] = useState<PushRegistrationState>("unknown");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +41,7 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
       setDisplayName(nextUser.displayName ?? "");
       setSavedDisplayName(nextUser.displayName ?? "");
       setNotificationSettings(nextPrefs);
-      setPushState("disabled");
+      setPushState(serverId ? await getPushRegistrationState(serverId) : "unknown");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {

@@ -1,6 +1,7 @@
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
+import * as SecureStore from "expo-secure-store";
 import { api } from "./api";
 import { PUSH_ENV } from "./config";
 import { getInstallationId } from "./session";
@@ -37,6 +38,7 @@ export async function registerForPush(serverId: string): Promise<boolean> {
       appVersion: Constants.expoConfig?.version ?? "0.1.0",
     }),
   }, serverId);
+  try { await SecureStore.setItemAsync(registrationMarkerKey(serverId), "registered"); } catch { /* registration succeeded; state will be unknown after restart */ }
   return true;
 }
 
@@ -45,9 +47,31 @@ export async function unregisterForPush(serverId: string): Promise<void> {
   await api(`/api/push/registrations/${encodeURIComponent(installationId)}`, {
     method: "DELETE",
   }, serverId);
+  try { await SecureStore.deleteItemAsync(registrationMarkerKey(serverId)); } catch { /* server unbound; local state will be unknown */ }
 }
 
 const responseDeduper = new NotificationResponseDeduper();
+
+export type PushRegistrationState = "unknown" | "enabled" | "unavailable" | "disabled" | "error";
+
+function registrationMarkerKey(serverId: string): string {
+  return `raft.push.registration.${serverId}`;
+}
+
+/** Read local permission and registration evidence without assuming a default. */
+export async function getPushRegistrationState(serverId: string): Promise<PushRegistrationState> {
+  try {
+    const permission = await Notifications.getPermissionsAsync();
+    if (permission.status === "denied") return "unavailable";
+    if (!Device.isDevice) return "unavailable";
+    const marker = await SecureStore.getItemAsync(registrationMarkerKey(serverId));
+    if (permission.status === "granted" && marker === "registered") return "enabled";
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 export function subscribeToNotificationTap(onTap: (data: Record<string, unknown>) => void) {
   let cancelled = false;
   void Notifications.getLastNotificationResponseAsync().then((response) => {

@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Button, FlatList, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { checkSavedMessages, formatStage2Date, saveMessage, searchMessages, unsaveMessage, type SearchResult, type Stage2SearchSort } from "../stage2Api";
 import { isCurrentSearchGeneration, reconcileSavedIds } from "../stage2Search";
+import { enqueueMessageMutation } from "../stage2SaveQueue";
 
 type Props = { serverId: string; onOpenMessage?: (result: SearchResult) => void };
 
@@ -17,15 +18,26 @@ export function SearchScreen({ serverId, onOpenMessage }: Props) {
   const busyRef = useRef(false);
   const submittedRef = useRef<{ q: string; sort: Stage2SearchSort }>({ q: "", sort: "relevance" });
   const savedMutationGeneration = useRef(new Map<string, number>());
+  const savedMutationQueue = useRef(new Map<string, Promise<unknown>>());
+  const savedIntent = useRef(new Map<string, boolean>());
   const toggleSaved = (item: SearchResult) => {
-    const wasSaved = Boolean(savedIds[item.id]);
+    const wasSaved = savedIntent.current.has(item.id) ? Boolean(savedIntent.current.get(item.id)) : Boolean(savedIds[item.id]);
     const nextSaved = !wasSaved;
+    savedIntent.current.set(item.id, nextSaved);
     const mutation = (savedMutationGeneration.current.get(item.id) ?? 0) + 1;
     savedMutationGeneration.current.set(item.id, mutation);
     setSavedIds((current) => ({ ...current, [item.id]: nextSaved }));
     setResults((current) => current.map((row) => row.id === item.id ? { ...row } : row));
-    void (wasSaved ? unsaveMessage(serverId, item.id) : saveMessage(serverId, item.id)).catch((cause) => {
+    void enqueueMessageMutation(savedMutationQueue.current, item.id, async () => {
+      await (wasSaved ? unsaveMessage(serverId, item.id) : saveMessage(serverId, item.id));
+      const saved = await checkSavedMessages(serverId, [item.id]);
+      if (savedMutationGeneration.current.get(item.id) === mutation) {
+        savedIntent.current.set(item.id, saved.savedIds.includes(item.id));
+        setSavedIds((current) => ({ ...current, [item.id]: saved.savedIds.includes(item.id) }));
+      }
+    }).catch((cause) => {
       if (savedMutationGeneration.current.get(item.id) !== mutation) return;
+      savedIntent.current.set(item.id, wasSaved);
       setSavedIds((current) => ({ ...current, [item.id]: wasSaved }));
       setError(cause instanceof Error ? cause.message : String(cause));
     });
@@ -50,8 +62,15 @@ export function SearchScreen({ serverId, onOpenMessage }: Props) {
         const mutationSnapshot = new Map(ids.map((id) => [id, savedMutationGeneration.current.get(id) ?? 0]));
         const saved = await checkSavedMessages(serverId, ids);
         if (!isCurrentSearchGeneration(requestGeneration.current, generation)) return;
-        setSavedIds((current) => reconcileSavedIds(current, ids, saved.savedIds, mutationSnapshot, savedMutationGeneration.current));
+        setSavedIds((current) => {
+          const next = reconcileSavedIds(current, ids, saved.savedIds, mutationSnapshot, savedMutationGeneration.current);
+          for (const id of ids) {
+            if ((savedMutationGeneration.current.get(id) ?? 0) === 0) savedIntent.current.set(id, Boolean(next[id]));
+          }
+          return next;
+        });
       } else if (!offset) {
+        savedIntent.current.clear();
         setSavedIds({});
       }
     } catch (cause) {
