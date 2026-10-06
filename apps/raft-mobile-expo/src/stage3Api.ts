@@ -48,6 +48,12 @@ export type WikiStatus = { space?: { status: string; wikiAgentName?: string | nu
 export function getServerTasks(serverId: string): Promise<{ tasks: MobileTask[] }> {
   return api("/api/tasks/server", {}, serverId);
 }
+export function createTask(serverId: string, channelId: string, title: string, description?: string): Promise<{ tasks: MobileTask[] }> {
+  return api(`/api/tasks/channel/${encodeURIComponent(channelId)}`, {
+    method: "POST",
+    body: JSON.stringify({ tasks: [{ title, ...(description ? { description } : {}) }] }),
+  }, serverId);
+}
 export function claimTask(serverId: string, taskId: string): Promise<{ task: MobileTask }> {
   return api(`/api/tasks/${encodeURIComponent(taskId)}/claim`, { method: "PATCH" }, serverId);
 }
