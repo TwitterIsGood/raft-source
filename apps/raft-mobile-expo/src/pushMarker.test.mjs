@@ -5,6 +5,7 @@ import {
   encodePushRegistrationMarker,
   markerMatchesIdentity,
   parsePushRegistrationMarker,
+  resolveRuntimePushState,
 } from "./pushMarker.ts";
 
 const identity = { serverId: "server-a", userId: "user-a", installationId: "ios-install-a" };
@@ -40,4 +41,20 @@ test("unregister reports unknown only when both delete and tombstone writes fail
     async setItemAsync() { throw new Error("set failed"); },
   };
   assert.equal(await clearPushRegistrationMarker(store, "key", identity), "unknown");
+});
+
+test("a historical marker cannot claim enabled after a restart", () => {
+  assert.equal(resolveRuntimePushState(null, identity, true, true), "unknown");
+  assert.equal(resolveRuntimePushState({ identity, status: "enabled" }, identity, true, true), "enabled");
+  assert.equal(resolveRuntimePushState({ identity, status: "disabled" }, identity, true, true), "disabled");
+  assert.equal(resolveRuntimePushState({ identity, status: "enabled" }, { ...identity, userId: "user-b" }, true, true), "unknown");
+});
+
+test("delete and tombstone failure cannot re-enable a stale registered marker", async () => {
+  const store = {
+    async deleteItemAsync() { throw new Error("delete failed"); },
+    async setItemAsync() { throw new Error("set failed"); },
+  };
+  assert.equal(await clearPushRegistrationMarker(store, "key", identity), "unknown");
+  assert.equal(resolveRuntimePushState(null, identity, true, true), "unknown");
 });

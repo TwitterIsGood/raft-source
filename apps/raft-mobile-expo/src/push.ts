@@ -9,10 +9,15 @@ import { NotificationResponseDeduper } from "./behavior";
 import {
   clearPushRegistrationMarker,
   encodePushRegistrationMarker,
-  markerMatchesIdentity,
-  parsePushRegistrationMarker,
+  resolveRuntimePushState,
   type PushMarkerIdentity,
+  type RuntimePushState,
 } from "./pushMarker";
+
+// A SecureStore marker survives logout/restart and only proves that a
+// registration happened in the past. "enabled" requires a fresh registration
+// in this process; otherwise the UI stays conservative and reports unknown.
+let runtimePushState: RuntimePushState = null;
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: true }),
@@ -54,6 +59,7 @@ export async function registerForPush(serverId: string): Promise<boolean> {
       encodePushRegistrationMarker({ version: 1, status: "registered", serverId, userId: user.id, installationId }),
     );
   } catch { /* registration succeeded; state will be unknown after restart */ }
+  runtimePushState = { identity: { serverId, userId: user.id, installationId }, status: "enabled" };
   return true;
 }
 
@@ -65,7 +71,11 @@ export async function unregisterForPush(serverId: string): Promise<"deleted" | "
   await api(`/api/push/registrations/${encodeURIComponent(installationId)}`, {
     method: "DELETE",
   }, serverId);
-  return clearPushRegistrationMarker(SecureStore, registrationMarkerKey(serverId), { serverId, userId: user.id, installationId });
+  const result = await clearPushRegistrationMarker(SecureStore, registrationMarkerKey(serverId), { serverId, userId: user.id, installationId });
+  runtimePushState = result === "unknown"
+    ? null
+    : { identity: { serverId, userId: user.id, installationId }, status: "disabled" };
+  return result;
 }
 
 const responseDeduper = new NotificationResponseDeduper();
@@ -82,17 +92,14 @@ export async function getPushRegistrationState(serverId: string): Promise<PushRe
     const permission = await Notifications.getPermissionsAsync();
     if (permission.status === "denied") return "unavailable";
     if (!Device.isDevice) return "unavailable";
-    const [markerValue, installationId, user] = await Promise.all([
-      SecureStore.getItemAsync(registrationMarkerKey(serverId)),
+    const [installationId, user] = await Promise.all([
       getInstallationId(),
       api<{ id: string }>("/api/auth/me"),
     ]);
-    const marker = parsePushRegistrationMarker(markerValue);
     const identity: PushMarkerIdentity = { serverId, userId: user.id, installationId };
-    if (permission.status === "granted" && marker && markerMatchesIdentity(marker, identity)) {
-      if (marker.status === "registered") return "enabled";
-      if (marker.status === "revoked") return "disabled";
-    }
+    const resolved = resolveRuntimePushState(runtimePushState, identity, permission.status === "granted", Device.isDevice);
+    if (resolved !== "unavailable" && resolved !== "unknown") return resolved;
+    if (resolved === "unavailable") return "unknown";
     return "unknown";
   } catch {
     return "unknown";

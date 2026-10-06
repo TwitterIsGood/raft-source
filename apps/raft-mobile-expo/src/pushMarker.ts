@@ -11,6 +11,11 @@ export type PushRegistrationMarker = PushMarkerIdentity & {
   status: PushMarkerStatus;
 };
 
+export type RuntimePushState = {
+  identity: PushMarkerIdentity;
+  status: "enabled" | "disabled";
+} | null;
+
 export function encodePushRegistrationMarker(marker: PushRegistrationMarker): string {
   return JSON.stringify(marker);
 }
@@ -34,6 +39,18 @@ export function markerMatchesIdentity(marker: PushRegistrationMarker | null, ide
     marker.userId === identity.userId &&
     marker.installationId === identity.installationId,
   );
+}
+
+/** Historical SecureStore markers are not enough to claim the server is bound. */
+export function resolveRuntimePushState(
+  runtime: RuntimePushState,
+  identity: PushMarkerIdentity,
+  permissionGranted: boolean,
+  isDevice: boolean,
+): "enabled" | "disabled" | "unknown" | "unavailable" {
+  if (!isDevice || !permissionGranted) return "unavailable";
+  if (runtime && markerMatchesIdentity({ ...runtime.identity, version: 1, status: runtime.status === "enabled" ? "registered" : "revoked" }, identity)) return runtime.status;
+  return "unknown";
 }
 
 export interface MarkerStore {
