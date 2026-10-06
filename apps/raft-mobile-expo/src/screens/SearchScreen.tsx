@@ -20,10 +20,12 @@ export function SearchScreen({ serverId, onOpenMessage }: Props) {
   const toggleSaved = (item: SearchResult) => {
     const wasSaved = Boolean(savedIds[item.id]);
     const nextSaved = !wasSaved;
-    savedMutationGeneration.current.set(item.id, (savedMutationGeneration.current.get(item.id) ?? 0) + 1);
+    const mutation = (savedMutationGeneration.current.get(item.id) ?? 0) + 1;
+    savedMutationGeneration.current.set(item.id, mutation);
     setSavedIds((current) => ({ ...current, [item.id]: nextSaved }));
     setResults((current) => current.map((row) => row.id === item.id ? { ...row } : row));
     void (wasSaved ? unsaveMessage(serverId, item.id) : saveMessage(serverId, item.id)).catch((cause) => {
+      if (savedMutationGeneration.current.get(item.id) !== mutation) return;
       setSavedIds((current) => ({ ...current, [item.id]: wasSaved }));
       setError(cause instanceof Error ? cause.message : String(cause));
     });

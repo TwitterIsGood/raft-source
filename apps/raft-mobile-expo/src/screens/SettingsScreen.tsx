@@ -56,7 +56,11 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
     if (!next || next === savedDisplayName) return;
     setBusy(true); setError(null); setMessage(null);
     try {
-      const nextUser = await updateCurrentUser({ displayName: next });
+      await updateCurrentUser({ displayName: next });
+      // Read the canonical server value back instead of treating the PATCH
+      // response as the only source of truth. This also exercises the same
+      // path used after a restart.
+      const nextUser = await getCurrentUser();
       setUser(nextUser);
       setDisplayName(nextUser.displayName ?? next);
       setSavedDisplayName(nextUser.displayName ?? next);
@@ -85,7 +89,8 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
     if (!serverId || !notificationSettings || busy) return;
     setBusy(true); setError(null); setMessage(null);
     try {
-      const next = await updateServerNotificationSettings(serverId, mode);
+      await updateServerNotificationSettings(serverId, mode);
+      const next = await getServerNotificationSettings(serverId);
       setNotificationSettings(next);
       setMessage("通知设置已保存。");
     } catch (cause) {
