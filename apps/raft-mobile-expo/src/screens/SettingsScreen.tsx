@@ -115,9 +115,9 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
     if (!serverId || busy) return;
     setBusy(true); setError(null); setMessage(null);
     try {
-      await unregisterForPush(serverId);
-      setPushState("disabled");
-      setMessage("本机推送已停用。");
+      const result = await unregisterForPush(serverId);
+      setPushState(result === "unknown" ? "unknown" : "disabled");
+      setMessage(result === "unknown" ? "服务器已停用推送，但本机状态暂时无法确认。" : "本机推送已停用。");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally { setBusy(false); }
