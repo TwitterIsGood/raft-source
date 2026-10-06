@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { formatStage2Date, getSavedMessages, unsaveMessage, type SavedMessage } from "../stage2Api";
 
@@ -9,16 +9,31 @@ export function SavedScreen({ serverId, onOpenMessage }: Props) {
   const [rows, setRows] = useState<SavedMessage[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadGeneration = useRef(0);
+  const pendingRemovals = useRef(new Set<string>());
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     setBusy(true); setError(null);
-    try { const response = await getSavedMessages(serverId, { q: query, limit: 50 }); setRows(response.saved); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setBusy(false); }
+    try {
+      const response = await getSavedMessages(serverId, { q: query, limit: 50 });
+      if (generation !== loadGeneration.current) return;
+      setRows(response.saved.filter((item) => !pendingRemovals.current.has(item.messageId)));
+    } catch (cause) {
+      if (generation === loadGeneration.current) setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      if (generation === loadGeneration.current) setBusy(false);
+    }
   }, [query, serverId]);
   useEffect(() => { void load(); }, [load]);
   const remove = (item: SavedMessage) => {
+    pendingRemovals.current.add(item.messageId);
+    ++loadGeneration.current;
     setRows((current) => current.filter((row) => row.messageId !== item.messageId));
-    void unsaveMessage(serverId, item.messageId).catch((cause) => {
+    setBusy(false);
+    void unsaveMessage(serverId, item.messageId).then(() => {
+      pendingRemovals.current.delete(item.messageId);
+    }).catch((cause) => {
+      pendingRemovals.current.delete(item.messageId);
       setError(cause instanceof Error ? cause.message : String(cause));
       setRows((current) => current.some((row) => row.messageId === item.messageId) ? current : [item, ...current]);
     });
