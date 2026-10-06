@@ -85,6 +85,7 @@ export default function App() {
   const loadingOlder = useRef(false);
   const navigationRef = useRef<{ serverId: string; channelId: string } | null>(null);
   const sessionEpochRef = useRef(getSessionGeneration());
+  const composerOperationRef = useRef(0);
   const draftsRef = useRef<Record<string, string>>({});
   const composerSnapshotRef = useRef<{ channelId: string | null; draft: string; attachmentIds: readonly string[]; mentionKeys: readonly string[] }>({ channelId: null, draft: "", attachmentIds: [], mentionKeys: [] });
   const [notice, setNotice] = useState("");
@@ -126,10 +127,11 @@ export default function App() {
     setPreviewAttachment(null);
   };
   const scopeIsCurrent = (serverId: string, channelId: string, epoch: number) => sessionEpochRef.current === epoch && isCurrentScope({ serverId, channelId }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null);
-  const open = (item: Channel, parent: Message | null = null) => { setActive(item); activeRef.current = item; setThreadParent(parent); if (!parent) setThreadOrigin(null); setMode("chat"); setError(null); setUploading(false); setSending(false); clearComposerAttachments(); clearAttachmentUrls(); setSelectedMentions([]); setMentionTrigger(null); setMentionQuery(""); setCursorPosition(0); };
+  const composerScopeIsCurrent = (serverId: string, channelId: string, epoch: number, operation: number) => composerOperationRef.current === operation && scopeIsCurrent(serverId, channelId, epoch);
+  const open = (item: Channel, parent: Message | null = null) => { composerOperationRef.current += 1; setActive(item); activeRef.current = item; setThreadParent(parent); if (!parent) setThreadOrigin(null); setMode("chat"); setError(null); setUploading(false); setSending(false); clearComposerAttachments(); clearAttachmentUrls(); setSelectedMentions([]); setMentionTrigger(null); setMentionQuery(""); setCursorPosition(0); };
   const back = () => {
     if (mode === "chat" && threadParent && threadOrigin) { open(threadOrigin); return; }
-    if (mode === "chat") { setMode("conversations"); setActive(null); activeRef.current = null; setThreadParent(null); setUploading(false); setSending(false); clearComposerAttachments(); clearAttachmentUrls(); setSelectedMentions([]); setMentionTrigger(null); setMentionQuery(""); return; }
+    if (mode === "chat") { composerOperationRef.current += 1; setMode("conversations"); setActive(null); activeRef.current = null; setThreadParent(null); setUploading(false); setSending(false); clearComposerAttachments(); clearAttachmentUrls(); setSelectedMentions([]); setMentionTrigger(null); setMentionQuery(""); return; }
     setMode("servers");
   };
   const report = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
@@ -381,13 +383,14 @@ export default function App() {
     const serverId = server.id;
     const channelId = active.id;
     const epoch = sessionEpochRef.current;
+    const operation = composerOperationRef.current;
     try {
       const assets = await pickAttachments(async () => {
         const result = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true, type: "*/*" });
         return result;
       }, { multiple: true });
       if (assets.length === 0) return;
-      if (!scopeIsCurrent(serverId, channelId, epoch)) return;
+      if (!composerScopeIsCurrent(serverId, channelId, epoch, operation)) return;
       const nextPicked = [...pickedAttachments, ...assets];
       if (nextPicked.length > 10) {
         throw new Error("一次最多选择 10 个附件。");
@@ -399,14 +402,14 @@ export default function App() {
         assets,
         request: (path, body, options) => apiMultipart(path, body, options?.serverId),
       });
-      if (!scopeIsCurrent(serverId, channelId, epoch)) return;
+      if (!composerScopeIsCurrent(serverId, channelId, epoch, operation)) return;
       setPickedAttachments(nextPicked);
       setUploadedAttachments((current) => [...current, ...uploaded]);
       setError(null);
     } catch (e) {
-      if (scopeIsCurrent(serverId, channelId, epoch)) report(e);
+      if (composerScopeIsCurrent(serverId, channelId, epoch, operation)) report(e);
     } finally {
-      if (scopeIsCurrent(serverId, channelId, epoch)) setUploading(false);
+      if (composerScopeIsCurrent(serverId, channelId, epoch, operation)) setUploading(false);
     }
   };
   const chooseMention = (candidate: MentionCandidate) => {
@@ -422,18 +425,19 @@ export default function App() {
     const serverId = server.id;
     const channelId = active.id;
     const epoch = sessionEpochRef.current;
+    const operation = composerOperationRef.current;
     try {
       const [resolved] = await resolveAttachmentUrls((path, options = {}) => api(path, {
         method: options.method,
         ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
         signal: options.signal,
       }, options.serverId), [attachment.id], { serverId });
-      if (!resolved?.url || !scopeIsCurrent(serverId, channelId, epoch)) return;
+      if (!resolved?.url || !composerScopeIsCurrent(serverId, channelId, epoch, operation)) return;
       setAttachmentUrls((current) => ({ ...current, [attachment.id]: resolved.url }));
       if (attachment.mimeType?.startsWith("image/")) setPreviewAttachment(attachment);
       else await Linking.openURL(resolved.url);
     } catch (e) {
-      if (scopeIsCurrent(serverId, channelId, epoch)) report(e);
+      if (composerScopeIsCurrent(serverId, channelId, epoch, operation)) report(e);
     }
   };
   const submitMessage = async () => {
@@ -442,6 +446,7 @@ export default function App() {
     const serverId = server.id;
     const channelId = active.id;
     const epoch = sessionEpochRef.current;
+    const operation = composerOperationRef.current;
     const draftBeforeSend = draftsRef.current[channelId] ?? "";
     const pendingAttachmentIds = [...attachmentIds];
     const pendingMentions = buildStructuredMentions(content, selectedMentions);
@@ -452,10 +457,10 @@ export default function App() {
     try {
       const response = await sendMessage(serverId, channelId, content, { attachmentIds: pendingAttachmentIds, mentions: pendingMentions });
       const row = normalize((response as any).message ?? response);
-      if (!scopeIsCurrent(serverId, channelId, epoch)) return;
+      if (!composerScopeIsCurrent(serverId, channelId, epoch, operation)) return;
       messageCacheRef.current.merge(serverId, [row]);
       const next = messageCacheRef.current.get(serverId, channelId);
-      if (scopeIsCurrent(serverId, channelId, epoch)) {
+      if (composerScopeIsCurrent(serverId, channelId, epoch, operation)) {
         setMessages(next);
         list.current?.scrollToOffset({ offset: 0, animated: true });
         const current = composerSnapshotRef.current;
@@ -471,10 +476,10 @@ export default function App() {
       const current = composerSnapshotRef.current;
       const now: ComposerSnapshot = { draft: current.channelId === channelId ? current.draft : "", attachmentIds: current.channelId === channelId ? current.attachmentIds : [] };
       const mentionKeysUnchanged = current.channelId === channelId && mentionKeysBeforeSend.every((key, index) => key === current.mentionKeys[index]) && current.mentionKeys.length === mentionKeysBeforeSend.length;
-      if (scopeIsCurrent(serverId, channelId, epoch) && canClearComposerAfterSend(expectedScope, { epoch, serverId, channelId }, beforeSend, now) && mentionKeysUnchanged) setDraft(draftBeforeSend);
-      if (scopeIsCurrent(serverId, channelId, epoch)) report(e);
+      if (composerScopeIsCurrent(serverId, channelId, epoch, operation) && canClearComposerAfterSend(expectedScope, { epoch, serverId, channelId }, beforeSend, now) && mentionKeysUnchanged) setDraft(draftBeforeSend);
+      if (composerScopeIsCurrent(serverId, channelId, epoch, operation)) report(e);
     }
-    finally { if (scopeIsCurrent(serverId, channelId, epoch)) setSending(false); }
+    finally { if (composerScopeIsCurrent(serverId, channelId, epoch, operation)) setSending(false); }
   };
   const openThread = async (parent: Message) => {
     if (!server || !active || active.type === "thread") return;

@@ -78,3 +78,24 @@ test("delayed page and send results cannot write after logout or clear new input
   current = scope(2);
   assert.equal(canClearComposerAfterSend(expected, current, { draft: "", attachmentIds: [] }, { draft: "", attachmentIds: [] }), false);
 });
+
+test("operation generation rejects a stale upload after returning to the same channel", async () => {
+  const expected = { ...scope(1), operation: 4 };
+  let current = expected;
+  const upload = deferred();
+  let attachments = [];
+
+  const run = (async () => {
+    const picked = ["picked-a"];
+    if (!isCurrentAsyncScope(expected, current)) return;
+    const uploaded = await upload.promise;
+    if (!isCurrentAsyncScope(expected, current)) return;
+    attachments = [...picked, ...uploaded];
+  })();
+
+  // A→B→A has the same server/channel/epoch, but a new composer operation.
+  current = { ...expected, operation: 6 };
+  upload.resolve(["uploaded-a"]);
+  await run;
+  assert.deepEqual(attachments, []);
+});
