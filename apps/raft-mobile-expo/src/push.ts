@@ -2,7 +2,7 @@ import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
 import { api } from "./api";
-import { APP_ENV } from "./config";
+import { PUSH_ENV } from "./config";
 import { getInstallationId } from "./session";
 import { NotificationResponseDeduper } from "./behavior";
 
@@ -30,7 +30,7 @@ export async function registerForPush(serverId: string): Promise<boolean> {
     method: "POST",
     body: JSON.stringify({
       provider: "apns",
-      env: APP_ENV === "production" ? "production" : "sandbox",
+      env: PUSH_ENV,
       installationId,
       deviceToken,
       topic: bundleId,

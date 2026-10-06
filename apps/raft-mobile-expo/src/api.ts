@@ -1,11 +1,12 @@
 import { API_BASE_URL } from "./config";
-import { clearSession, readSession, saveSession } from "./session";
+import { clearSession, getSessionGeneration, readSession, saveSession } from "./session";
 
 let refreshInFlight: Promise<string | null> | null = null;
 
 async function raw<T>(path: string, init: RequestInit = {}, token?: string, serverId?: string): Promise<T> {
   const headers = new Headers(init.headers);
-  headers.set("Content-Type", "application/json");
+  if (init.body instanceof FormData) headers.delete("Content-Type");
+  else headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
   if (serverId) headers.set("X-Server-Id", serverId);
   const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
@@ -21,6 +22,7 @@ async function raw<T>(path: string, init: RequestInit = {}, token?: string, serv
 export async function refreshAccessToken(): Promise<string | null> {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
+    const generation = getSessionGeneration();
     const { refreshToken } = await readSession();
     if (!refreshToken) return null;
     try {
@@ -28,11 +30,16 @@ export async function refreshAccessToken(): Promise<string | null> {
         method: "POST",
         body: JSON.stringify({ refreshToken }),
       });
+      if (getSessionGeneration() !== generation) return null;
       await saveSession(result.accessToken, result.refreshToken);
       return result.accessToken;
-    } catch {
-      await clearSession();
-      return null;
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      // A network/5xx failure must keep the local session so the next request
+      // can retry. Only an explicit credential rejection invalidates it.
+      if (status === 401 || status === 403) await clearSession();
+      if (status === 401 || status === 403) return null;
+      throw error;
     } finally {
       refreshInFlight = null;
     }
@@ -50,6 +57,10 @@ export async function api<T>(path: string, init: RequestInit = {}, serverId?: st
     if (!token) throw error;
     return raw<T>(path, init, token, serverId);
   }
+}
+
+export async function apiMultipart<T>(path: string, body: FormData, serverId?: string): Promise<T> {
+  return api<T>(path, { method: "POST", body }, serverId);
 }
 
 export async function login(email: string, password: string) {
@@ -97,6 +108,7 @@ export async function getServers() { return api<ServerResponse[]>("/api/servers"
 export async function getChannels(serverId: string) { return api<ChannelResponse[]>("/api/channels", {}, serverId); }
 export async function getDMs(serverId: string) { return api<ChannelResponse[]>("/api/channels/dm", {}, serverId); }
 export async function getChannel(serverId: string, channelId: string) { return api<ChannelResponse>(`/api/channels/${channelId}`, {}, serverId); }
+export async function getChannelMembers(serverId: string, channelId: string) { return api<ChannelMembersResponse>(`/api/channels/${channelId}/members`, {}, serverId); }
 export async function getMessages(serverId: string, channelId: string, before?: number) {
   const cursor = before ? `&before=${before}` : "";
   return api<{ messages: MessageResponse[]; historyLimited?: boolean }>(`/api/messages/channel/${channelId}?limit=50${cursor}`, {}, serverId);
@@ -104,13 +116,16 @@ export async function getMessages(serverId: string, channelId: string, before?: 
 export async function getOrCreateThread(serverId: string, channelId: string, parentMessageId: string) {
   return api<{ threadChannelId: string }>(`/api/channels/${channelId}/threads`, { method: "POST", body: JSON.stringify({ parentMessageId }) }, serverId);
 }
-export async function sendMessage(serverId: string, channelId: string, content: string) {
+export async function sendMessage(serverId: string, channelId: string, content: string, options: { attachmentIds?: string[]; mentions?: StructuredMentionResponse[] } = {}) {
   return api<MessageResponse>("/api/messages", {
     method: "POST",
-    body: JSON.stringify({ channelId, content, randomId: `ios-${Date.now()}-${Math.random().toString(36).slice(2)}` }),
+    body: JSON.stringify({ channelId, content, randomId: `ios-${Date.now()}-${Math.random().toString(36).slice(2)}`, ...(options.attachmentIds?.length ? { attachmentIds: options.attachmentIds } : {}), ...(options.mentions?.length ? { mentions: options.mentions } : {}) }),
   }, serverId);
 }
 
 export type ServerResponse = { id: string; name: string; slug: string; avatarUrl?: string | null; role?: string };
 export type ChannelResponse = { id: string; name?: string | null; type?: string; serverId: string; joined?: boolean; archivedAt?: string | null; peerName?: string; peerDisplayName?: string | null };
-export type MessageResponse = { id: string; seq?: number; channelId: string; senderType?: string; senderId?: string; senderName?: string; content: string; createdAt: string; updatedAt?: string; messageType?: string };
+export type ChannelMemberResponse = { id: string; name?: string; displayName?: string | null; avatarUrl?: string | null; status?: string };
+export type ChannelMembersResponse = { humans?: ChannelMemberResponse[]; agents?: ChannelMemberResponse[] };
+export type StructuredMentionResponse = { type: "user" | "agent"; id: string; name: string };
+export type MessageResponse = { id: string; seq?: number; channelId: string; senderType?: string; senderId?: string; senderName?: string; content: string; createdAt: string; updatedAt?: string; messageType?: string; attachmentIds?: string[]; attachments?: unknown[]; mentions?: StructuredMentionResponse[] };

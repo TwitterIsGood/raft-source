@@ -1,17 +1,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, AppState, FlatList, Image, KeyboardAvoidingView, Linking, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import * as DocumentPicker from "expo-document-picker";
 import { StatusBar } from "expo-status-bar";
-import { forgotPassword, getChannel, getChannels, getDMs, getMessages, getOrCreateThread, getServers, login, logoutRemote, register, sendMessage } from "./src/api";
-import { clearSession, readSession } from "./src/session";
+import { apiMultipart, forgotPassword, getChannel, getChannelMembers, getChannels, getDMs, getMessages, getOrCreateThread, getServers, login, logoutRemote, register, sendMessage } from "./src/api";
+import { bumpSessionGeneration, clearSession, getSessionGeneration, readSession } from "./src/session";
 import { registerForPush, subscribeToNotificationTap, unregisterForPush } from "./src/push";
 import { createRaftSocket } from "./src/socket";
 import { MessageCache } from "./src/messageCache";
 import { completedCursor, isCurrentScope, sendableDraft } from "./src/behavior";
 import type { Channel, Message, Server } from "./src/types";
+import { uploadAttachments, type Attachment, type PickedAttachment, pickAttachments } from "./src/attachments";
+import { buildMentionCandidateGroups, buildStructuredMentions, findMentionTrigger, insertMentionAtCursor, type MentionCandidate, type MentionTrigger, type StructuredMention } from "./src/mentions";
 
 const color = { ink: "#17212F", muted: "#718096", line: "#E5EAF0", bg: "#F6F8FB", blue: "#365FE8", mine: "#E8EEFF", white: "#FFFFFF" };
 const displayName = (channel: Channel) => channel.type === "dm" ? channel.peerDisplayName || channel.peerName || channel.name || "私信" : channel.name || "未命名频道";
-const normalize = (m: any): Message => ({ id: m.id, seq: m.seq, channelId: m.channelId, senderType: m.senderType, senderId: m.senderId, senderName: m.senderName || "Raft", content: m.content || "", createdAt: m.createdAt || new Date().toISOString(), messageType: m.messageType });
+const normalize = (m: any): Message => ({
+  id: m.id,
+  seq: m.seq,
+  channelId: m.channelId,
+  senderType: m.senderType,
+  senderId: m.senderId,
+  senderName: m.senderName || "Raft",
+  content: m.content || "",
+  createdAt: m.createdAt || new Date().toISOString(),
+  messageType: m.messageType,
+  attachmentIds: Array.isArray(m.attachmentIds) ? m.attachmentIds.filter((id: unknown): id is string => typeof id === "string") : undefined,
+  attachments: Array.isArray(m.attachments) ? m.attachments.flatMap((attachment: any) => {
+    if (!attachment || typeof attachment !== "object" || typeof attachment.id !== "string" || typeof attachment.filename !== "string") return [];
+    return [{ id: attachment.id, filename: attachment.filename, mimeType: typeof attachment.mimeType === "string" ? attachment.mimeType : null, sizeBytes: typeof attachment.sizeBytes === "number" ? attachment.sizeBytes : 0, thumbnailUrl: typeof attachment.thumbnailUrl === "string" ? attachment.thumbnailUrl : null, width: typeof attachment.width === "number" ? attachment.width : null, height: typeof attachment.height === "number" ? attachment.height : null }];
+  }) : undefined,
+  mentions: Array.isArray(m.mentions) ? m.mentions.flatMap((mention: any) => (mention && (mention.type === "user" || mention.type === "agent") && typeof mention.id === "string" && typeof mention.name === "string") ? [{ type: mention.type, id: mention.id, name: mention.name }] : []) : undefined,
+});
 const validEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
 type ViewMode = "servers" | "conversations" | "chat";
@@ -39,6 +58,14 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [pickedAttachments, setPickedAttachments] = useState<PickedAttachment[]>([]);
+  const [uploadedAttachments, setUploadedAttachments] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [mentionCandidates, setMentionCandidates] = useState<MentionCandidate[]>([]);
+  const [selectedMentions, setSelectedMentions] = useState<StructuredMention[]>([]);
+  const [cursorPosition, setCursorPosition] = useState(0);
+  const [mentionTrigger, setMentionTrigger] = useState<MentionTrigger | null>(null);
+  const [mentionQuery, setMentionQuery] = useState("");
   const list = useRef<FlatList<Message>>(null);
   const activeRef = useRef<Channel | null>(null);
   const serverRef = useRef<Server | null>(null);
@@ -47,41 +74,77 @@ export default function App() {
   const messageCacheRef = useRef(new MessageCache());
   const serverCursorRef = useRef(new Map<string, number>());
   const syncingServerRef = useRef(new Set<string>());
+  const pendingServerSeqRef = useRef(new Map<string, number>());
   const checkedServerSeqRef = useRef(new Map<string, number>());
   const syncServerRef = useRef<(() => void) | null>(null);
   const socketRef = useRef<ReturnType<typeof createRaftSocket> | null>(null);
   const activeRequestRef = useRef(0);
   const loadingOlder = useRef(false);
   const navigationRef = useRef<{ serverId: string; channelId: string } | null>(null);
+  const sessionEpochRef = useRef(getSessionGeneration());
+  const draftsRef = useRef<Record<string, string>>({});
   const [notice, setNotice] = useState("");
 
   const draft = active ? drafts[active.id] || "" : "";
-  const setDraft = (value: string) => active && setDrafts((current) => ({ ...current, [active.id]: value }));
-  const open = (item: Channel, parent: Message | null = null) => { setActive(item); activeRef.current = item; setThreadParent(parent); if (!parent) setThreadOrigin(null); setMode("chat"); setError(null); };
+  const attachmentIds = uploadedAttachments.map((attachment) => attachment.id);
+  const mentionGroups = useMemo(() => buildMentionCandidateGroups({ candidates: mentionCandidates, query: mentionQuery, channelMemberIds: new Set(mentionCandidates.map((candidate) => candidate.id)) }), [mentionCandidates, mentionQuery]);
+  const mentionResults = mentionGroups.flat.slice(0, 8);
+  const setDraft = (value: string) => {
+    if (!active) return;
+    draftsRef.current = { ...draftsRef.current, [active.id]: value };
+    setDrafts(draftsRef.current);
+  };
+  const updateMentionTrigger = (content: string, cursor: number) => {
+    const trigger = findMentionTrigger(content, cursor);
+    setCursorPosition(cursor);
+    setMentionTrigger(trigger);
+    setMentionQuery(trigger?.query ?? "");
+  };
+  const handleDraftChange = (value: string) => {
+    const previousLength = draft.length;
+    const cursor = cursorPosition >= previousLength ? value.length : Math.min(cursorPosition, value.length);
+    setDraft(value);
+    updateMentionTrigger(value, cursor);
+  };
+  const clearComposerAttachments = () => {
+    setPickedAttachments([]);
+    setUploadedAttachments([]);
+  };
+  const open = (item: Channel, parent: Message | null = null) => { setActive(item); activeRef.current = item; setThreadParent(parent); if (!parent) setThreadOrigin(null); setMode("chat"); setError(null); clearComposerAttachments(); setSelectedMentions([]); setMentionTrigger(null); setMentionQuery(""); setCursorPosition(0); };
   const back = () => {
     if (mode === "chat" && threadParent && threadOrigin) { open(threadOrigin); return; }
-    if (mode === "chat") { setMode("conversations"); setActive(null); activeRef.current = null; setThreadParent(null); return; }
+    if (mode === "chat") { setMode("conversations"); setActive(null); activeRef.current = null; setThreadParent(null); clearComposerAttachments(); setSelectedMentions([]); setMentionTrigger(null); setMentionQuery(""); return; }
     setMode("servers");
   };
   const report = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
 
-  useEffect(() => { void readSession().then(({ accessToken }) => { setLoggedIn(Boolean(accessToken)); setReady(true); }); }, []);
+  useEffect(() => { void readSession().then(({ accessToken }) => { sessionEpochRef.current = getSessionGeneration(); setLoggedIn(Boolean(accessToken)); setReady(true); }); }, []);
   useEffect(() => {
     if (!loggedIn) return;
-    void getServers().then((rows) => { serversRef.current = rows; setServers(rows); setServer((current) => rows.find((row) => row.id === navigationRef.current?.serverId) ?? (current && rows.some((row) => row.id === current.id) ? current : rows[0] ?? null)); }).catch(report);
+    const epoch = sessionEpochRef.current;
+    void getServers().then((rows) => {
+      if (sessionEpochRef.current !== epoch) return;
+      serversRef.current = rows;
+      setServers(rows);
+      setServer((current) => rows.find((row) => row.id === navigationRef.current?.serverId) ?? (current && rows.some((row) => row.id === current.id) ? current : rows[0] ?? null));
+    }).catch((e) => { if (sessionEpochRef.current === epoch) report(e); });
   }, [loggedIn]);
   useEffect(() => {
     if (!server) return;
+    const epoch = sessionEpochRef.current;
     let cancelled = false;
     serverRef.current = server;
     setChannels([]);
     channelsRef.current = [];
     setActive(null);
+    clearComposerAttachments();
+    setSelectedMentions([]);
+    setMentionCandidates([]);
     activeRef.current = null;
     activeRequestRef.current += 1;
     setMode("conversations");
     void Promise.all([getChannels(server.id), getDMs(server.id)]).then(([regular, dms]) => {
-      if (cancelled) return;
+      if (cancelled || sessionEpochRef.current !== epoch) return;
       const items = [...regular.filter((item) => item.joined !== false && !item.archivedAt), ...dms];
       channelsRef.current = items;
       setChannels(items);
@@ -89,30 +152,33 @@ export default function App() {
       if (target?.serverId === server.id) {
         const found = items.find((item) => item.id === target.channelId);
         if (found) open(found);
-        else void getChannel(server.id, target.channelId).then((row) => { if (!cancelled) open(row); }).catch(report);
+        else void getChannel(server.id, target.channelId).then((row) => { if (!cancelled && sessionEpochRef.current === epoch) open(row); }).catch((e) => { if (!cancelled && sessionEpochRef.current === epoch) report(e); });
         navigationRef.current = null;
       }
-    }).catch(report);
+    }).catch((e) => { if (!cancelled && sessionEpochRef.current === epoch) report(e); });
     void registerForPush(server.id).catch(() => undefined);
     return () => { cancelled = true; };
   }, [server]);
   useEffect(() => {
     if (!server) return;
+    const epoch = sessionEpochRef.current;
     let closed = false;
     const cacheMessage = (row: Message) => {
-      if (closed) return;
+      if (closed || sessionEpochRef.current !== epoch) return;
       messageCacheRef.current.merge(server.id, [row]);
       const next = messageCacheRef.current.get(server.id, row.channelId);
       if (isCurrentScope({ serverId: server.id, channelId: row.channelId }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null)) setMessages(next);
     };
-    const syncServer = async () => {
-      if (syncingServerRef.current.has(server.id)) return;
+    const syncServer = async (): Promise<boolean> => {
+      if (syncingServerRef.current.has(server.id)) return false;
       syncingServerRef.current.add(server.id);
+      let completed = false;
       try {
         let cursor = serverCursorRef.current.get(server.id) ?? 0;
         while (!closed) {
           const rows = await import("./src/api").then(({ api }) => api<Message[]>(`/api/messages/sync?since_seq=${cursor}&limit=200`, {}, server.id));
-          if (closed || rows.length === 0) break;
+          if (closed || sessionEpochRef.current !== epoch) return false;
+          if (rows.length === 0) break;
           rows.map(normalize).forEach(cacheMessage);
           const nextCursor = Math.max(cursor, ...rows.map((row) => row.seq ?? 0));
           if (nextCursor <= cursor) break;
@@ -120,9 +186,18 @@ export default function App() {
           serverCursorRef.current.set(server.id, cursor);
           if (rows.length < 200) break;
         }
+        completed = true;
       } catch {
-        // Retry from the last complete page on a later reconnect.
+        // Keep the heartbeat checkpoint unchanged so the same seq retries.
       } finally { syncingServerRef.current.delete(server.id); }
+      if (completed) {
+        const pending = pendingServerSeqRef.current.get(server.id);
+        if (pending !== undefined) {
+          checkedServerSeqRef.current.set(server.id, pending);
+          pendingServerSeqRef.current.delete(server.id);
+        }
+      }
+      return completed;
     };
     syncServerRef.current = () => { void syncServer(); };
     const handle = createRaftSocket(server.id, () => serverCursorRef.current.get(server.id) ?? 0, (row) => {
@@ -134,9 +209,11 @@ export default function App() {
       serverCursorRef.current.set(server.id, completedCursor(serverCursorRef.current.get(server.id) ?? 0, currentSeq, hasMore));
     }, (serverSeq) => {
       if (serverSeq > (checkedServerSeqRef.current.get(server.id) ?? 0)) {
-        void syncServer().then(() => checkedServerSeqRef.current.set(server.id, serverSeq));
+        pendingServerSeqRef.current.set(server.id, Math.max(serverSeq, pendingServerSeqRef.current.get(server.id) ?? 0));
+        void syncServer();
       }
     }, () => { void syncServer(); }, () => {
+      if (sessionEpochRef.current !== epoch) return;
       setLoggedIn(false);
       setError("登录已失效，请重新登录");
     });
@@ -145,13 +222,14 @@ export default function App() {
   }, [server]);
   useEffect(() => {
     if (!server || !active) return;
+    const epoch = sessionEpochRef.current;
     let cancelled = false;
     const requestId = ++activeRequestRef.current;
     const serverId = server.id;
     const channelId = active.id;
     setMessages([]); setHasOlder(false); setLoading(true);
     void getMessages(serverId, channelId).then((result) => {
-      if (cancelled) return;
+      if (cancelled || sessionEpochRef.current !== epoch) return;
       const rows = result.messages.map(normalize);
       messageCacheRef.current.merge(serverId, rows);
       const next = messageCacheRef.current.get(serverId, channelId);
@@ -160,12 +238,34 @@ export default function App() {
         setHasOlder(rows.length >= 50 && !result.historyLimited);
         setLoading(false);
       }
-    }).catch((e) => { if (!cancelled) { report(e); setLoading(false); } });
+    }).catch((e) => { if (!cancelled && sessionEpochRef.current === epoch) { report(e); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [server, active]);
+  useEffect(() => {
+    if (!server || !active) {
+      setMentionCandidates([]);
+      setSelectedMentions([]);
+      setMentionTrigger(null);
+      setMentionQuery("");
+      return;
+    }
+    const epoch = sessionEpochRef.current;
+    let cancelled = false;
+    void getChannelMembers(server.id, active.id).then((result) => {
+      if (cancelled || sessionEpochRef.current !== epoch) return;
+      const humans = (result.humans ?? []).map((member) => ({ id: member.id, name: member.name || member.displayName || member.id, displayName: member.displayName, avatarUrl: member.avatarUrl, type: "user" as const }));
+      const agents = (result.agents ?? []).map((member) => ({ id: member.id, name: member.name || member.displayName || member.id, displayName: member.displayName, avatarUrl: member.avatarUrl, type: "agent" as const }));
+      setMentionCandidates([...humans, ...agents]);
+    }).catch(() => {
+      if (!cancelled && sessionEpochRef.current === epoch) setMentionCandidates([]);
+    });
     return () => { cancelled = true; };
   }, [server, active]);
   useEffect(() => {
     if (!loggedIn) return;
+    const epoch = sessionEpochRef.current;
     return subscribeToNotificationTap((payload) => {
+      if (sessionEpochRef.current !== epoch) return;
       const targetServerId = payload.serverId;
       const targetChannelId = payload.channelId;
       if (typeof targetServerId !== "string" || typeof targetChannelId !== "string") return;
@@ -176,7 +276,7 @@ export default function App() {
         navigationRef.current = { serverId: targetServerId, channelId: targetChannelId };
         const target = serversRef.current.find((item) => item.id === targetServerId);
         if (target) setServer(target);
-        else void getServers().then((rows) => { serversRef.current = rows; setServers(rows); const row = rows.find((item) => item.id === targetServerId); if (row) setServer(row); });
+        else void getServers().then((rows) => { if (sessionEpochRef.current !== epoch) return; serversRef.current = rows; setServers(rows); const row = rows.find((item) => item.id === targetServerId); if (row) setServer(row); });
       }
     });
   }, [loggedIn]);
@@ -194,6 +294,7 @@ export default function App() {
     const serverId = server.id;
     const channelId = active.id;
     const requestId = activeRequestRef.current;
+    const epoch = sessionEpochRef.current;
     const oldest = Math.min(...messages.map((m) => m.seq ?? Number.MAX_SAFE_INTEGER));
     if (!Number.isFinite(oldest)) return;
     loadingOlder.current = true;
@@ -202,11 +303,11 @@ export default function App() {
       const rows = result.messages.map(normalize);
       messageCacheRef.current.merge(serverId, rows);
       const next = messageCacheRef.current.get(serverId, channelId);
-      if (requestId === activeRequestRef.current && isCurrentScope({ serverId, channelId }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null)) {
+      if (epoch === sessionEpochRef.current && requestId === activeRequestRef.current && isCurrentScope({ serverId, channelId }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null)) {
         setMessages(next);
         setHasOlder(rows.length >= 50 && !result.historyLimited);
       }
-    } catch (e) { report(e); } finally { loadingOlder.current = false; }
+    } catch (e) { if (epoch === sessionEpochRef.current) report(e); } finally { loadingOlder.current = false; }
   };
   const switchAuth = (next: AuthMode) => { setAuthMode(next); setError(null); setForgotSent(false); };
   const submitLogin = async () => {
@@ -215,15 +316,17 @@ export default function App() {
       if (!validEmail(email.trim())) throw new Error("请输入有效邮箱地址。");
       if (authMode === "login" && !password) throw new Error("请输入密码。");
       if (authMode === "register" && password.length < 8) throw new Error("密码至少需要 8 个字符。");
-      if (authMode === "login") { await login(email.trim(), password); setLoggedIn(true); }
+      if (authMode === "login") { await login(email.trim(), password); sessionEpochRef.current = getSessionGeneration(); setLoggedIn(true); }
       else if (authMode === "register") {
         if (!acceptedLegal) throw new Error("创建账号前需要同意服务条款并确认隐私政策。");
-        await register(email.trim(), password); setLoggedIn(true);
+        await register(email.trim(), password); sessionEpochRef.current = getSessionGeneration(); setLoggedIn(true);
       } else { await forgotPassword(email.trim()); setForgotSent(true); }
     } catch (e) { report(e); }
     finally { setAuthBusy(false); }
   };
   const logout = async () => {
+    bumpSessionGeneration();
+    sessionEpochRef.current = getSessionGeneration();
     const currentServer = server;
     try {
       if (currentServer) await unregisterForPush(currentServer.id);
@@ -234,26 +337,84 @@ export default function App() {
     socketRef.current = null;
     serverRef.current = null;
     activeRef.current = null;
+    draftsRef.current = {};
+    setDrafts({});
+    serversRef.current = [];
+    channelsRef.current = [];
+    setServers([]);
+    setChannels([]);
+    setMessages([]);
+    pendingServerSeqRef.current.clear();
+    checkedServerSeqRef.current.clear();
     messageCacheRef.current.clear();
     serverCursorRef.current.clear();
     setLoggedIn(false);
     setServer(null);
     setActive(null);
+    clearComposerAttachments();
+    setSelectedMentions([]);
+    setMentionCandidates([]);
+  };
+  const chooseAttachments = async () => {
+    if (!server || !active || uploading || sending) return;
+    try {
+      const assets = await pickAttachments(async () => {
+        const result = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true, type: "*/*" });
+        return result;
+      }, { multiple: true });
+      if (assets.length === 0) return;
+      const nextPicked = [...pickedAttachments, ...assets];
+      if (nextPicked.length > 10) {
+        throw new Error("一次最多选择 10 个附件。");
+      }
+      setUploading(true);
+      const uploaded = await uploadAttachments({
+        channelId: active.id,
+        serverId: server.id,
+        assets,
+        request: (path, body, options) => apiMultipart(path, body, options?.serverId),
+      });
+      setPickedAttachments(nextPicked);
+      setUploadedAttachments((current) => [...current, ...uploaded]);
+      setError(null);
+    } catch (e) {
+      report(e);
+    } finally {
+      setUploading(false);
+    }
+  };
+  const chooseMention = (candidate: MentionCandidate) => {
+    const insertion = insertMentionAtCursor(draft, cursorPosition, candidate);
+    setDraft(insertion.content);
+    setCursorPosition(insertion.cursor);
+    setMentionTrigger(null);
+    setMentionQuery("");
+    if (insertion.mention) setSelectedMentions((current) => [...current.filter((item) => `${item.type}:${item.id}` !== `${insertion.mention?.type}:${insertion.mention?.id}`), insertion.mention as StructuredMention]);
   };
   const submitMessage = async () => {
     const content = sendableDraft(draft);
-    if (!content || !server || !active || sending) return;
+    if ((!content && attachmentIds.length === 0) || !server || !active || sending || uploading) return;
     const serverId = server.id;
     const channelId = active.id;
+    const epoch = sessionEpochRef.current;
+    const draftBeforeSend = draftsRef.current[channelId] ?? "";
+    const pendingAttachmentIds = [...attachmentIds];
+    const pendingMentions = buildStructuredMentions(content, selectedMentions);
     setSending(true); setDraft("");
     try {
-      const response = await sendMessage(serverId, channelId, content);
+      const response = await sendMessage(serverId, channelId, content, { attachmentIds: pendingAttachmentIds, mentions: pendingMentions });
       const row = normalize((response as any).message ?? response);
       messageCacheRef.current.merge(serverId, [row]);
       const next = messageCacheRef.current.get(serverId, channelId);
-      if (isCurrentScope({ serverId, channelId }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null)) { setMessages(next); list.current?.scrollToOffset({ offset: 0, animated: true }); }
+      if (epoch === sessionEpochRef.current && isCurrentScope({ serverId, channelId }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null)) { setMessages(next); list.current?.scrollToOffset({ offset: 0, animated: true }); }
+      setSelectedMentions([]);
+      clearComposerAttachments();
     }
-    catch (e) { if (isCurrentScope({ serverId, channelId }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null)) setDraft(content); report(e); }
+    catch (e) {
+      const currentDraft = draftsRef.current[channelId] ?? "";
+      if (epoch === sessionEpochRef.current && currentDraft === "" && draftBeforeSend === content && isCurrentScope({ serverId, channelId }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null)) setDraft(content);
+      if (epoch === sessionEpochRef.current) report(e);
+    }
     finally { setSending(false); }
   };
   const openThread = async (parent: Message) => {
@@ -296,7 +457,7 @@ export default function App() {
     {error ? <Pressable onPress={() => setError(null)} style={styles.errorBar}><Text numberOfLines={2} style={styles.error}>{error}</Text></Pressable> : null}
     {mode === "servers" ? <FlatList data={servers} keyExtractor={(item) => item.id} contentContainerStyle={styles.listPad} renderItem={({ item }) => <Pressable style={styles.conversationRow} onPress={() => { setServer(item); setMode("conversations"); }}><Text style={styles.rowTitle}>{item.name}</Text><Text style={styles.muted}>{item.slug}</Text></Pressable>} /> : null}
     {mode === "conversations" ? <FlatList data={channels} keyExtractor={(item) => item.id} contentContainerStyle={styles.listPad} renderItem={({ item }) => <Pressable style={styles.conversationRow} onPress={() => open(item)}><Text style={styles.rowTitle}>{item.type === "dm" ? "@" : "#"} {displayName(item)}</Text><Text style={styles.muted}>{item.type === "dm" ? "私信" : "频道"}</Text></Pressable>} ListEmptyComponent={<View style={styles.center}><Text style={styles.muted}>暂无已加入的频道或私信</Text></View>} /> : null}
-    {mode === "chat" ? <KeyboardAvoidingView style={styles.chat} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={0}>{threadParent ? <View style={styles.threadParent}><Text style={styles.muted}>回复 {threadParent.senderName}</Text><Text numberOfLines={2}>{threadParent.content}</Text></View> : null}<FlatList ref={list} inverted data={messages} keyExtractor={(item) => item.id} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.messages} renderItem={({ item }) => <Pressable style={styles.message} onPress={() => void openThread(item)}><View style={styles.messageHeader}><Text style={styles.sender}>{item.senderName}</Text><Text style={styles.time}>{new Date(item.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</Text></View><Text style={styles.content}>{item.content}</Text></Pressable>} onEndReached={() => void loadOlder()} onEndReachedThreshold={0.3} ListFooterComponent={loading ? <ActivityIndicator color={color.blue} /> : null} initialNumToRender={20} maxToRenderPerBatch={15} windowSize={7} removeClippedSubviews={Platform.OS !== "ios"} maintainVisibleContentPosition={{ minIndexForVisible: 0 }} /><View style={styles.composer}><TextInput value={draft} onChangeText={setDraft} placeholder="写消息…" multiline maxLength={32000} style={styles.composerInput} textAlignVertical="top" /><Pressable style={[styles.send, (!draft.trim() || sending) && styles.disabled]} disabled={!draft.trim() || sending} accessibilityLabel="发送消息" onPress={() => void submitMessage()}><Text style={styles.sendLabel}>发送</Text></Pressable></View></KeyboardAvoidingView> : null}
+    {mode === "chat" ? <KeyboardAvoidingView style={styles.chat} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={0}>{threadParent ? <View style={styles.threadParent}><Text style={styles.muted}>回复 {threadParent.senderName}</Text><Text numberOfLines={2}>{threadParent.content}</Text></View> : null}<FlatList ref={list} inverted data={messages} keyExtractor={(item) => item.id} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.messages} renderItem={({ item }) => <Pressable style={styles.message} onPress={() => void openThread(item)}><View style={styles.messageHeader}><Text style={styles.sender}>{item.senderName}</Text><Text style={styles.time}>{new Date(item.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</Text></View><Text style={styles.content}>{item.content}</Text>{item.attachments?.map((attachment) => <View key={attachment.id} style={styles.attachmentRow}><Text style={styles.attachmentLabel}>📎 {attachment.filename}</Text><Text style={styles.muted}>{attachment.mimeType || "附件"}</Text></View>)}{item.mentions?.length ? <Text style={styles.mentionSummary}>提及：{item.mentions.map((mention) => `@${mention.name}`).join(" ")}</Text> : null}</Pressable>} onEndReached={() => void loadOlder()} onEndReachedThreshold={0.3} ListFooterComponent={loading ? <ActivityIndicator color={color.blue} /> : null} initialNumToRender={20} maxToRenderPerBatch={15} windowSize={7} removeClippedSubviews={Platform.OS !== "ios"} maintainVisibleContentPosition={{ minIndexForVisible: 0 }} /><View style={styles.composer}><View style={styles.composerTools}><Pressable style={styles.toolButton} accessibilityLabel="添加附件" disabled={uploading || sending} onPress={() => void chooseAttachments()}><Text style={styles.toolLabel}>{uploading ? "上传中…" : "附件"}</Text></Pressable>{pickedAttachments.length ? <Text numberOfLines={1} style={styles.attachmentPending}>已选 {pickedAttachments.map((asset) => asset.name).join("、")}</Text> : null}</View><TextInput value={draft} onChangeText={handleDraftChange} onSelectionChange={(event) => { const cursor = event.nativeEvent.selection.end; setCursorPosition(cursor); updateMentionTrigger(draft, cursor); }} placeholder="写消息…" multiline maxLength={32000} style={styles.composerInput} textAlignVertical="top" /><Pressable style={[styles.send, ((!draft.trim() && attachmentIds.length === 0) || sending || uploading) && styles.disabled]} disabled={(!draft.trim() && attachmentIds.length === 0) || sending || uploading} accessibilityLabel="发送消息" onPress={() => void submitMessage()}><Text style={styles.sendLabel}>发送</Text></Pressable>{mentionTrigger && mentionResults.length ? <View style={styles.mentionMenu}>{mentionResults.map((candidate) => <Pressable key={`${candidate.type}:${candidate.id}`} style={styles.mentionRow} onPress={() => chooseMention(candidate)}><Text style={styles.mentionName}>@{candidate.name}</Text><Text style={styles.muted}>{candidate.type === "agent" ? "Agent" : "成员"}</Text></Pressable>)}</View> : null}</View></KeyboardAvoidingView> : null}
     {notice ? <Pressable style={styles.notice} onPress={() => setNotice("")}><Text numberOfLines={2} style={styles.noticeText}>{notice}</Text></Pressable> : null}
   </SafeAreaView>;
 }
@@ -305,5 +466,5 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: color.white }, center: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 160 },
   authShell: { flex: 1, backgroundColor: "#FFFFFF" }, authFlex: { flex: 1 }, authTopBar: { height: 58, backgroundColor: "#FFD440", borderBottomWidth: 2, borderBottomColor: "#141111", paddingHorizontal: 20, justifyContent: "center" }, authLogo: { width: 118, height: 30 }, authContent: { flexGrow: 1, justifyContent: "center", paddingHorizontal: 20, paddingVertical: 40 }, authForm: { width: "100%", maxWidth: 420, alignSelf: "center" }, authTitle: { color: "#141111", fontSize: 24, fontWeight: "700", textAlign: "center", marginBottom: 20 }, authDescription: { color: "#141111", opacity: 0.6, fontSize: 14, lineHeight: 20, textAlign: "center", marginTop: -8, marginBottom: 20 }, authStrong: { fontWeight: "700", fontFamily: Platform.OS === "ios" ? "Menlo" : undefined }, authBanner: { backgroundColor: "#FFF0E8", borderWidth: 2, borderColor: "#141111", padding: 10, marginBottom: 16 }, authBannerText: { color: "#141111", fontSize: 13, fontWeight: "700" }, authField: { marginBottom: 16 }, authLabel: { color: "#141111", fontSize: 14, fontWeight: "700", marginBottom: 5 }, authInput: { minHeight: 44, borderWidth: 2, borderColor: "#141111", paddingHorizontal: 10, paddingVertical: 8, fontSize: 16, color: "#141111", backgroundColor: "#FFFFFF", shadowColor: "#141111", shadowOffset: { width: 2, height: 2 }, shadowOpacity: 1, shadowRadius: 0, elevation: 2 }, authPrimary: { minHeight: 48, backgroundColor: "#FE7DA8", borderWidth: 2, borderColor: "#141111", alignItems: "center", justifyContent: "center", shadowColor: "#141111", shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0, elevation: 4, marginTop: 2, marginBottom: 18 }, authPrimaryText: { color: "#141111", fontSize: 15, fontWeight: "700" }, authDisabled: { opacity: 0.45 }, authLink: { color: "#141111", fontSize: 14, fontWeight: "700", textAlign: "center", textDecorationLine: "underline", marginBottom: 14 }, authPrompt: { color: "#141111", fontSize: 14, textAlign: "center", marginBottom: 12 }, authLinkInline: { color: "#FE7DA8", fontWeight: "700", textDecorationLine: "underline" }, legalAgreement: { color: "#141111", opacity: 0.6, fontSize: 12, lineHeight: 18, textAlign: "center", marginTop: 4 },
   legalRow: { flexDirection: "row", alignItems: "center", marginBottom: 16 }, checkbox: { width: 22, height: 22, borderWidth: 2, borderColor: "#141111", marginRight: 8, alignItems: "center", justifyContent: "center" }, checkboxChecked: { backgroundColor: "#FFD440" }, checkmark: { color: "#141111", fontWeight: "800" }, legalText: { flex: 1, color: "#141111", fontSize: 13 }, error: { color: "#B91C1C", fontSize: 13 }, errorBar: { backgroundColor: "#FEF2F2", padding: 8 },
-  header: { height: 54, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: color.line, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, headerAction: { color: color.blue, fontSize: 14, minWidth: 54 }, headerTitle: { color: color.ink, fontSize: 17, fontWeight: "700", maxWidth: "52%" }, listPad: { paddingBottom: 20 }, conversationRow: { minHeight: 68, justifyContent: "center", borderBottomWidth: 1, borderBottomColor: color.line, paddingHorizontal: 18 }, rowTitle: { color: color.ink, fontSize: 16, fontWeight: "600" }, muted: { color: color.muted, fontSize: 12, marginTop: 3 }, chat: { flex: 1 }, threadParent: { padding: 10, backgroundColor: color.bg, borderBottomWidth: 1, borderBottomColor: color.line }, messages: { paddingHorizontal: 14, paddingTop: 14, paddingBottom: 8 }, message: { padding: 10, marginBottom: 8, borderRadius: 12, backgroundColor: color.bg }, messageHeader: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }, sender: { color: color.ink, fontSize: 13, fontWeight: "700" }, time: { color: color.muted, fontSize: 11 }, content: { color: color.ink, fontSize: 16, lineHeight: 23 }, composer: { flexDirection: "row", alignItems: "flex-end", borderTopWidth: 1, borderTopColor: color.line, padding: 10, gap: 8, backgroundColor: color.white }, composerInput: { flex: 1, maxHeight: 140, minHeight: 44, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: color.line, fontSize: 16, color: color.ink }, send: { minHeight: 44, justifyContent: "center", paddingHorizontal: 14, backgroundColor: color.blue, borderRadius: 12 }, disabled: { opacity: 0.4 }, sendLabel: { color: color.white, fontWeight: "700" }, notice: { position: "absolute", bottom: 92, left: 12, right: 12, padding: 12, borderRadius: 10, backgroundColor: color.ink }, noticeText: { color: color.white }
+  header: { height: 54, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: color.line, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, headerAction: { color: color.blue, fontSize: 14, minWidth: 54 }, headerTitle: { color: color.ink, fontSize: 17, fontWeight: "700", maxWidth: "52%" }, listPad: { paddingBottom: 20 }, conversationRow: { minHeight: 68, justifyContent: "center", borderBottomWidth: 1, borderBottomColor: color.line, paddingHorizontal: 18 }, rowTitle: { color: color.ink, fontSize: 16, fontWeight: "600" }, muted: { color: color.muted, fontSize: 12, marginTop: 3 }, chat: { flex: 1 }, threadParent: { padding: 10, backgroundColor: color.bg, borderBottomWidth: 1, borderBottomColor: color.line }, messages: { paddingHorizontal: 14, paddingTop: 14, paddingBottom: 8 }, message: { padding: 10, marginBottom: 8, borderRadius: 12, backgroundColor: color.bg }, messageHeader: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }, sender: { color: color.ink, fontSize: 13, fontWeight: "700" }, time: { color: color.muted, fontSize: 11 }, content: { color: color.ink, fontSize: 16, lineHeight: 23 }, attachmentRow: { marginTop: 7, padding: 8, borderRadius: 8, backgroundColor: color.white, borderWidth: 1, borderColor: color.line }, attachmentLabel: { color: color.ink, fontSize: 13, fontWeight: "600" }, mentionSummary: { color: color.blue, fontSize: 12, marginTop: 7 }, composer: { position: "relative", borderTopWidth: 1, borderTopColor: color.line, padding: 10, backgroundColor: color.white }, composerTools: { flexDirection: "row", alignItems: "center", marginBottom: 6, minHeight: 28 }, toolButton: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: color.bg }, toolLabel: { color: color.blue, fontSize: 13, fontWeight: "700" }, attachmentPending: { flex: 1, color: color.muted, fontSize: 12, marginLeft: 8 }, composerInput: { maxHeight: 140, minHeight: 44, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: color.line, fontSize: 16, color: color.ink }, send: { position: "absolute", right: 10, bottom: 10, minHeight: 44, justifyContent: "center", paddingHorizontal: 14, backgroundColor: color.blue, borderRadius: 12 }, disabled: { opacity: 0.4 }, sendLabel: { color: color.white, fontWeight: "700" }, mentionMenu: { position: "absolute", left: 10, right: 10, bottom: 64, maxHeight: 220, backgroundColor: color.white, borderWidth: 1, borderColor: color.line, borderRadius: 10, shadowColor: color.ink, shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.12, shadowRadius: 6, elevation: 3 }, mentionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: color.line }, mentionName: { color: color.ink, fontSize: 14, fontWeight: "600" }, notice: { position: "absolute", bottom: 92, left: 12, right: 12, padding: 12, borderRadius: 10, backgroundColor: color.ink }, noticeText: { color: color.white }
 });

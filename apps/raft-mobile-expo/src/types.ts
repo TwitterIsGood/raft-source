@@ -28,4 +28,7 @@ export type Message = {
   createdAt: string;
   updatedAt?: string;
   messageType?: string;
+  attachmentIds?: string[];
+  attachments?: Array<{ id: string; filename: string; mimeType: string | null; sizeBytes: number; thumbnailUrl?: string | null; width?: number | null; height?: number | null }>;
+  mentions?: Array<{ type: "user" | "agent"; id: string; name: string }>;
 };

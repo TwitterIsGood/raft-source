@@ -19,7 +19,8 @@
       "expo-secure-store"
     ],
     "extra": {
-      "apiBaseUrl": "https://bj1.v.lhb.ink:63204"
+      "apiBaseUrl": "https://bj1.v.lhb.ink:63204",
+      "apnsEnv": "sandbox"
     }
   }
 }

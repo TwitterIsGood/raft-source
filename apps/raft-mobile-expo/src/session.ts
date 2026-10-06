@@ -4,6 +4,18 @@ const ACCESS = "raft.accessToken";
 const REFRESH = "raft.refreshToken";
 const INSTALLATION = "raft.installationId";
 
+let sessionGeneration = 0;
+
+export function getSessionGeneration() {
+  return sessionGeneration;
+}
+
+/** Invalidate all in-flight work before the local session is cleared. */
+export function bumpSessionGeneration() {
+  sessionGeneration += 1;
+  return sessionGeneration;
+}
+
 export async function readSession() {
   const [accessToken, refreshToken] = await Promise.all([
     SecureStore.getItemAsync(ACCESS),
@@ -20,6 +32,7 @@ export async function saveSession(accessToken: string, refreshToken: string) {
 }
 
 export async function clearSession() {
+  bumpSessionGeneration();
   await Promise.all([SecureStore.deleteItemAsync(ACCESS), SecureStore.deleteItemAsync(REFRESH)]);
 }
 

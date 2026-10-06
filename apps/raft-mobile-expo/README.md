@@ -14,6 +14,18 @@ The `start` and `ios` scripts set `EXPO_NO_METRO_WORKSPACE_ROOT=1` so Metro bund
 
 `EXPO_PUBLIC_RAFT_API_URL` overrides the API origin. The default is `https://bj1.v.lhb.ink:63204`.
 
+For an isolated test build, the export must use the explicit isolated origin and
+the helper rejects missing, different, or production URLs in the generated
+bundle:
+
+```bash
+EXPO_PUBLIC_RAFT_API_URL=http://127.0.0.1:13074 npm run export:ios:isolated
+```
+
+Do not use an old `dist` directory as evidence. The helper exports first and
+then checks the fresh output for the isolated origin and absence of the
+production origin.
+
 ## SignCloud
 
 SignCloud can build this project with `kind=expo` (prebuild + CocoaPods + Xcode) or `kind=simulator` for local Simulator installation. Keep `package-lock.json` committed so dependency caching is reproducible.
