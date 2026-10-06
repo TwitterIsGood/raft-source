@@ -1,6 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Button, FlatList, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { checkSavedMessages, formatStage2Date, saveMessage, searchMessages, unsaveMessage, type SearchResult, type Stage2SearchSort } from "../stage2Api";
+import { isCurrentSearchGeneration, reconcileSavedIds } from "../stage2Search";
 
 type Props = { serverId: string; onOpenMessage?: (result: SearchResult) => void };
 
@@ -12,9 +13,14 @@ export function SearchScreen({ serverId, onOpenMessage }: Props) {
   const [savedIds, setSavedIds] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestGeneration = useRef(0);
+  const busyRef = useRef(false);
+  const submittedRef = useRef<{ q: string; sort: Stage2SearchSort }>({ q: "", sort: "relevance" });
+  const savedMutationGeneration = useRef(new Map<string, number>());
   const toggleSaved = (item: SearchResult) => {
     const wasSaved = Boolean(savedIds[item.id]);
     const nextSaved = !wasSaved;
+    savedMutationGeneration.current.set(item.id, (savedMutationGeneration.current.get(item.id) ?? 0) + 1);
     setSavedIds((current) => ({ ...current, [item.id]: nextSaved }));
     setResults((current) => current.map((row) => row.id === item.id ? { ...row } : row));
     void (wasSaved ? unsaveMessage(serverId, item.id) : saveMessage(serverId, item.id)).catch((cause) => {
@@ -23,18 +29,38 @@ export function SearchScreen({ serverId, onOpenMessage }: Props) {
     });
   };
   const run = useCallback(async (offset = 0) => {
+    if (offset > 0 && busyRef.current) return;
+    const generation = offset === 0 ? requestGeneration.current + 1 : requestGeneration.current;
+    if (offset === 0) {
+      requestGeneration.current = generation;
+      submittedRef.current = { q: query.trim(), sort };
+    }
+    const submitted = submittedRef.current;
+    busyRef.current = true;
     setBusy(true); setError(null);
     try {
-      const response = await searchMessages(serverId, { q: query, sort, limit: 20, offset });
+      const response = await searchMessages(serverId, { q: submitted.q, sort: submitted.sort, limit: 20, offset });
+      if (!isCurrentSearchGeneration(requestGeneration.current, generation)) return;
       setResults((previous) => offset ? [...previous, ...response.results] : response.results);
       setHasMore(response.hasMore);
       const ids = response.results.map((item) => item.id);
       if (ids.length) {
+        const mutationSnapshot = new Map(ids.map((id) => [id, savedMutationGeneration.current.get(id) ?? 0]));
         const saved = await checkSavedMessages(serverId, ids);
-        setSavedIds((current) => { const next = { ...current }; for (const id of saved.savedIds) next[id] = true; return next; });
+        if (!isCurrentSearchGeneration(requestGeneration.current, generation)) return;
+        setSavedIds((current) => reconcileSavedIds(current, ids, saved.savedIds, mutationSnapshot, savedMutationGeneration.current));
+      } else if (!offset) {
+        setSavedIds({});
       }
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setBusy(false); }
+    } catch (cause) {
+      if (isCurrentSearchGeneration(requestGeneration.current, generation)) setError(cause instanceof Error ? cause.message : String(cause));
+    }
+    finally {
+      if (isCurrentSearchGeneration(requestGeneration.current, generation)) {
+        busyRef.current = false;
+        setBusy(false);
+      }
+    }
   }, [query, serverId, sort]);
   return <View style={styles.root}>
     <Text style={styles.title}>搜索</Text>
@@ -45,7 +71,7 @@ export function SearchScreen({ serverId, onOpenMessage }: Props) {
     <View style={styles.sortRow}><Pressable onPress={() => setSort("relevance")} accessibilityRole="button"><Text style={[styles.sort, sort === "relevance" && styles.selected]}>相关度</Text></Pressable><Pressable onPress={() => setSort("recent")} accessibilityRole="button"><Text style={[styles.sort, sort === "recent" && styles.selected]}>最近</Text></Pressable></View>
     {error ? <Text style={styles.error}>{error}</Text> : null}
     {busy && !results.length ? <ActivityIndicator style={styles.loading} /> : null}
-    <FlatList data={results} extraData={savedIds} keyExtractor={(item) => `${item.id}:${savedIds[item.id] ? "saved" : "unsaved"}`} contentContainerStyle={styles.list} onEndReached={() => { if (hasMore && !busy) void run(results.length); }} renderItem={({ item }) => <View style={styles.card}><Pressable onPress={() => onOpenMessage?.(item)} accessibilityRole="button" accessibilityLabel={`打开搜索结果 ${item.channelName} ${item.content}`}><Text style={styles.meta}>{item.channelName} · {item.senderName}</Text><Text style={styles.content}>{item.snippet || item.content}</Text><Text style={styles.time}>{formatStage2Date(item.createdAt)}</Text></Pressable><Button title={savedIds[item.id] ? "取消保存" : "保存"} accessibilityLabel={savedIds[item.id] ? "取消保存" : "保存消息"} onPress={() => toggleSaved(item)} /></View>} ListEmptyComponent={!busy ? <Text style={styles.empty}>输入关键词开始搜索</Text> : null} />
+    <FlatList data={results} extraData={savedIds} keyExtractor={(item) => `${item.id}:${savedIds[item.id] ? "saved" : "unsaved"}`} contentContainerStyle={styles.list} onEndReached={() => { if (hasMore) void run(results.length); }} renderItem={({ item }) => <View style={styles.card}><Pressable onPress={() => onOpenMessage?.(item)} accessibilityRole="button" accessibilityLabel={`打开搜索结果 ${item.channelName} ${item.content}`}><Text style={styles.meta}>{item.channelName} · {item.senderName}</Text><Text style={styles.content}>{item.snippet || item.content}</Text><Text style={styles.time}>{formatStage2Date(item.createdAt)}</Text></Pressable><Button title={savedIds[item.id] ? "取消保存" : "保存"} accessibilityLabel={savedIds[item.id] ? "取消保存" : "保存消息"} onPress={() => toggleSaved(item)} /></View>} ListEmptyComponent={!busy ? <Text style={styles.empty}>输入关键词开始搜索</Text> : null} />
   </View>;
 }
 

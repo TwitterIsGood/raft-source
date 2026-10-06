@@ -113,6 +113,15 @@ export async function getMessages(serverId: string, channelId: string, before?: 
   const cursor = before ? `&before=${before}` : "";
   return api<{ messages: MessageResponse[]; historyLimited?: boolean }>(`/api/messages/channel/${channelId}?limit=50${cursor}`, {}, serverId);
 }
+export async function getMessageContext(serverId: string, channelId: string, messageId: string) {
+  return api<{
+    messages: MessageResponse[];
+    targetMessageId?: string;
+    hasOlder?: boolean;
+    hasNewer?: boolean;
+    historyLimited?: boolean;
+  }>(`/api/messages/context/${encodeURIComponent(messageId)}?channelId=${encodeURIComponent(channelId)}`, {}, serverId);
+}
 export async function getOrCreateThread(serverId: string, channelId: string, parentMessageId: string) {
   return api<{ threadChannelId: string }>(`/api/channels/${channelId}/threads`, { method: "POST", body: JSON.stringify({ parentMessageId }) }, serverId);
 }
