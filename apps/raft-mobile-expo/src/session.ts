@@ -28,8 +28,8 @@ export async function readSession() {
   return storage.read(ACCESS, REFRESH);
 }
 
-export async function saveSession(accessToken: string, refreshToken: string) {
-  await storage.save(ACCESS, REFRESH, accessToken, refreshToken);
+export async function saveSession(accessToken: string, refreshToken: string, guard?: () => boolean) {
+  await storage.save(ACCESS, REFRESH, accessToken, refreshToken, guard);
 }
 
 export async function clearSession() {

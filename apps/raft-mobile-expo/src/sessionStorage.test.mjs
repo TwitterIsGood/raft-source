@@ -94,3 +94,15 @@ test('access write failure still waits for a late refresh write before logout cl
   assert.deepEqual(calls.slice(-2), [['delete', 'access'], ['delete', 'refresh']]);
   assert.deepEqual(await session.read('access', 'refresh'), { accessToken: null, refreshToken: null });
 });
+
+test('stale guarded save is cleared in its queue slot before a newer save', async () => {
+  const { secure, values } = fakeSecure();
+  const session = createSessionStorage(secure, false);
+  let current = true;
+  const stale = session.save('access', 'refresh', 'old-a', 'old-r', () => current);
+  current = false;
+  const fresh = session.save('access', 'refresh', 'new-a', 'new-r');
+  await stale;
+  await fresh;
+  assert.deepEqual(values, new Map([['access', 'new-a'], ['refresh', 'new-r']]));
+});

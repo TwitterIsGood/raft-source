@@ -400,7 +400,7 @@ export default function App() {
       }
     } catch (e) { if (epoch === sessionEpochRef.current) report(e); } finally { loadingOlder.current = false; }
   };
-  const switchAuth = (next: AuthMode) => { ++authRequestRef.current; setAuthBusy(false); passwordInputRef.current = ""; setPassword(""); setAuthMode(next); setError(null); setForgotSent(false); };
+  const switchAuth = (next: AuthMode) => { ++authRequestRef.current; void clearSession(); setAuthBusy(false); passwordInputRef.current = ""; setPassword(""); setAuthMode(next); setError(null); setForgotSent(false); };
   const submitLogin = async () => {
     const requestId = ++authRequestRef.current;
     const requestMode = authMode;
@@ -416,11 +416,11 @@ export default function App() {
       if (!validEmail(currentEmail)) throw new Error("请输入有效邮箱地址。");
       if (authMode === "login" && !currentPassword) throw new Error("请输入密码。");
       if (authMode === "register" && currentPassword.length < 8) throw new Error("密码至少需要 8 个字符。");
-      if (authMode === "login") { const result = await login(currentEmail, currentPassword); if (!canApplyAuthResult(authRequestRef.current, requestId, authMode, requestMode)) return; await saveSession(result.accessToken, result.refreshToken); sessionEpochRef.current = getSessionGeneration(); setLoggedIn(true); }
+      if (authMode === "login") { const result = await login(currentEmail, currentPassword); const isCurrent = () => canApplyAuthResult(authRequestRef.current, requestId, authMode, requestMode); if (!isCurrent()) return; await saveSession(result.accessToken, result.refreshToken, isCurrent); if (!isCurrent()) return; sessionEpochRef.current = getSessionGeneration(); setLoggedIn(true); }
       else if (authMode === "register") {
         if (!acceptedLegal) throw new Error("创建账号前需要同意服务条款并确认隐私政策。");
-        const result = await register(currentEmail, currentPassword); if (!canApplyAuthResult(authRequestRef.current, requestId, authMode, requestMode)) return; await saveSession(result.accessToken, result.refreshToken); sessionEpochRef.current = getSessionGeneration(); setLoggedIn(true);
-      } else { await forgotPassword(currentEmail); setForgotSent(true); }
+        const result = await register(currentEmail, currentPassword); const isCurrent = () => canApplyAuthResult(authRequestRef.current, requestId, authMode, requestMode); if (!isCurrent()) return; await saveSession(result.accessToken, result.refreshToken, isCurrent); if (!isCurrent()) return; sessionEpochRef.current = getSessionGeneration(); setLoggedIn(true);
+      } else { await forgotPassword(currentEmail); if (canApplyAuthResult(authRequestRef.current, requestId, authMode, requestMode)) setForgotSent(true); }
     } catch (e) { if (canApplyAuthResult(authRequestRef.current, requestId, authMode, requestMode)) report(e); }
     finally { if (canApplyAuthResult(authRequestRef.current, requestId, authMode, requestMode)) setAuthBusy(false); }
   };

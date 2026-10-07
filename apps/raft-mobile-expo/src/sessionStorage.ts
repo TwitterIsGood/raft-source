@@ -4,6 +4,8 @@ export type SecureStorage = {
   deleteItemAsync(key: string): Promise<void>;
 };
 
+type SaveGuard = () => boolean;
+
 export function createSessionStorage(secure: SecureStorage, isolatedSimulator: boolean) {
   let access: string | null = null;
   let refresh: string | null = null;
@@ -35,12 +37,21 @@ export function createSessionStorage(secure: SecureStorage, isolatedSimulator: b
       });
       return { accessToken, refreshToken };
     },
-    async save(accessKey: string, refreshKey: string, accessToken: string, refreshToken: string) {
-      if (isolatedSimulator) { access = accessToken; refresh = refreshToken; return; }
-      await enqueue(() => settlePair([
-        secure.setItemAsync(accessKey, accessToken),
-        secure.setItemAsync(refreshKey, refreshToken),
-      ]).then(() => undefined));
+    async save(accessKey: string, refreshKey: string, accessToken: string, refreshToken: string, guard?: SaveGuard) {
+      if (isolatedSimulator) { if (guard?.() === false) return; access = accessToken; refresh = refreshToken; return; }
+      await enqueue(async () => {
+        if (guard?.() === false) return;
+        await settlePair([
+          secure.setItemAsync(accessKey, accessToken),
+          secure.setItemAsync(refreshKey, refreshToken),
+        ]);
+        // If the request became stale while SecureStore was writing, clear
+        // inside this queue slot. A newer save queued after us then runs next.
+        if (guard?.() === false) await settlePair([
+          secure.deleteItemAsync(accessKey),
+          secure.deleteItemAsync(refreshKey),
+        ]);
+      });
     },
     async clear(accessKey: string, refreshKey: string) {
       if (isolatedSimulator) { access = null; refresh = null; return; }
