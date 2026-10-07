@@ -64,16 +64,14 @@ export async function apiMultipart<T>(path: string, body: FormData, serverId?: s
 }
 
 export async function login(email: string, password: string) {
-  const result = await raw<{ accessToken: string; refreshToken: string; user: unknown }>("/api/auth/login", {
+  return raw<{ accessToken: string; refreshToken: string; user: unknown }>("/api/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
-  await saveSession(result.accessToken, result.refreshToken);
-  return result;
 }
 
 export async function register(email: string, password: string) {
-  const result = await raw<{ accessToken: string; refreshToken: string; user: unknown }>("/api/auth/register", {
+  return raw<{ accessToken: string; refreshToken: string; user: unknown }>("/api/auth/register", {
     method: "POST",
     body: JSON.stringify({
       email,
@@ -84,8 +82,6 @@ export async function register(email: string, password: string) {
       legalAcceptanceSource: "signup",
     }),
   });
-  await saveSession(result.accessToken, result.refreshToken);
-  return result;
 }
 
 export async function completeProfile(name: string, displayName?: string) {

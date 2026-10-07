@@ -3,12 +3,13 @@ import { ActivityIndicator, AppState, FlatList, Image, KeyboardAvoidingView, Lin
 import * as DocumentPicker from "expo-document-picker";
 import { StatusBar } from "expo-status-bar";
 import { api, apiMultipart, completeProfile, forgotPassword, getChannel, getChannelMembers, getChannels, getDMs, getMessageContext, getMessages, getOrCreateThread, getServers, login, logoutRemote, register, sendMessage } from "./src/api";
-import { bumpSessionGeneration, clearSession, getSessionGeneration, readSession } from "./src/session";
+import { bumpSessionGeneration, clearSession, getSessionGeneration, readSession, saveSession } from "./src/session";
 import { registerForPush, subscribeToNotificationTap, unregisterForPush } from "./src/push";
 import { createRaftSocket } from "./src/socket";
 import { MessageCache } from "./src/messageCache";
 import { completedCursor, isCurrentScope, sendableDraft } from "./src/behavior";
 import { canClearComposerAfterSend, type ComposerSnapshot } from "./src/asyncGuards";
+import { canApplyAuthResult, snapshotAuthInput } from "./src/authFlow";
 import type { Channel, Message, Server } from "./src/types";
 import { resolveAttachmentUrls, uploadAttachments, type Attachment, type PickedAttachment, pickAttachments } from "./src/attachments";
 import { buildMentionCandidateGroups, buildStructuredMentions, findMentionTrigger, insertMentionAtCursor, type MentionCandidate, type MentionTrigger, type StructuredMention } from "./src/mentions";
@@ -55,6 +56,7 @@ export default function App() {
   const [profileDisplayName, setProfileDisplayName] = useState("");
   const [profileBusy, setProfileBusy] = useState(false);
   const [authRefresh, setAuthRefresh] = useState(0);
+  const authRequestRef = useRef(0);
   const [servers, setServers] = useState<Server[]>([]);
   const [server, setServer] = useState<Server | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -398,26 +400,29 @@ export default function App() {
       }
     } catch (e) { if (epoch === sessionEpochRef.current) report(e); } finally { loadingOlder.current = false; }
   };
-  const switchAuth = (next: AuthMode) => { setAuthMode(next); setError(null); setForgotSent(false); };
+  const switchAuth = (next: AuthMode) => { ++authRequestRef.current; setAuthBusy(false); passwordInputRef.current = ""; setPassword(""); setAuthMode(next); setError(null); setForgotSent(false); };
   const submitLogin = async () => {
+    const requestId = ++authRequestRef.current;
+    const requestMode = authMode;
     setError(null); setAuthBusy(true);
     try {
       // Native secure fields can deliver the final automation keystroke just
       // after the button press. Let the event queue flush before taking the
       // imperative values used for the request.
       await new Promise((resolve) => setTimeout(resolve, 150));
-      const currentEmail = (emailInputRef.current || email).trim();
-      const currentPassword = passwordInputRef.current || password;
+      const snapshot = snapshotAuthInput({ email: emailInputRef.current, password: passwordInputRef.current });
+      const currentEmail = snapshot.email;
+      const currentPassword = snapshot.password;
       if (!validEmail(currentEmail)) throw new Error("请输入有效邮箱地址。");
       if (authMode === "login" && !currentPassword) throw new Error("请输入密码。");
       if (authMode === "register" && currentPassword.length < 8) throw new Error("密码至少需要 8 个字符。");
-      if (authMode === "login") { await login(currentEmail, currentPassword); sessionEpochRef.current = getSessionGeneration(); setLoggedIn(true); }
+      if (authMode === "login") { const result = await login(currentEmail, currentPassword); if (!canApplyAuthResult(authRequestRef.current, requestId, authMode, requestMode)) return; await saveSession(result.accessToken, result.refreshToken); sessionEpochRef.current = getSessionGeneration(); setLoggedIn(true); }
       else if (authMode === "register") {
         if (!acceptedLegal) throw new Error("创建账号前需要同意服务条款并确认隐私政策。");
-        await register(currentEmail, currentPassword); sessionEpochRef.current = getSessionGeneration(); setLoggedIn(true);
+        const result = await register(currentEmail, currentPassword); if (!canApplyAuthResult(authRequestRef.current, requestId, authMode, requestMode)) return; await saveSession(result.accessToken, result.refreshToken); sessionEpochRef.current = getSessionGeneration(); setLoggedIn(true);
       } else { await forgotPassword(currentEmail); setForgotSent(true); }
-    } catch (e) { report(e); }
-    finally { setAuthBusy(false); }
+    } catch (e) { if (canApplyAuthResult(authRequestRef.current, requestId, authMode, requestMode)) report(e); }
+    finally { if (canApplyAuthResult(authRequestRef.current, requestId, authMode, requestMode)) setAuthBusy(false); }
   };
   const submitProfileSetup = async () => {
     const name = profileName.trim();
@@ -438,6 +443,7 @@ export default function App() {
     }
   };
   const logout = async () => {
+    ++authRequestRef.current;
     ++profileRequestRef.current;
     bumpSessionGeneration();
     sessionEpochRef.current = getSessionGeneration();
@@ -464,7 +470,12 @@ export default function App() {
     messageCacheRef.current.clear();
     serverCursorRef.current.clear();
     setLoggedIn(false);
+    emailInputRef.current = "";
+    passwordInputRef.current = "";
+    setEmail("");
+    setPassword("");
     setProfileSetupRequired(false);
+    setProfileBusy(false);
     setProfileName("");
     setProfileDisplayName("");
     setServer(null);
@@ -639,6 +650,7 @@ export default function App() {
             <View style={styles.authField}><Text style={styles.authLabel}>用户名</Text><TextInput value={profileName} onChangeText={setProfileName} autoCapitalize="none" autoCorrect={false} style={styles.authInput} accessibilityLabel="用户名" /></View>
             <View style={styles.authField}><Text style={styles.authLabel}>显示名称（可选）</Text><TextInput value={profileDisplayName} onChangeText={setProfileDisplayName} style={styles.authInput} accessibilityLabel="显示名称" /></View>
             <Pressable style={[styles.authPrimary, (profileBusy || profileName.trim().length < 5) && styles.authDisabled]} disabled={profileBusy || profileName.trim().length < 5} onPress={() => void submitProfileSetup()}><Text style={styles.authPrimaryText}>{profileBusy ? "保存中…" : "完成设置"}</Text></Pressable>
+            <Pressable onPress={() => void logout()}><Text style={styles.authLink}>退出并切换账号</Text></Pressable>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
