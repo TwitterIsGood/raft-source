@@ -84,7 +84,14 @@ function WikiImageBlock({ block }: { block: Extract<WikiBlock, { kind: "image" }
 function WikiInline({ text }: { text: string }) {
   const [linkError, setLinkError] = useState(false);
   const parts = splitWikiInline(text);
-  return <>{parts.map((part, index) => part.url ? <Text key={index} accessibilityRole="link" style={[styles.wikiLink, part.strong && styles.wikiStrong]} onPress={isWikiExternalUrl(part.url) ? () => { void Linking.openURL(part.url!).catch(() => setLinkError(true)); } : undefined}>{part.text}</Text> : <Text key={index} style={part.strong ? styles.wikiStrong : undefined}>{part.text}</Text>)}{linkError ? <Text accessibilityLabel="链接打开失败" style={styles.wikiLinkError}>链接打开失败</Text> : null}</>;
+  const openLink = (url: string) => {
+    if (!isWikiExternalUrl(url)) {
+      setLinkError(true);
+      return;
+    }
+    void Linking.openURL(url).catch(() => setLinkError(true));
+  };
+  return <>{parts.map((part, index) => part.url ? <Text key={index} accessibilityRole="link" style={[styles.wikiLink, part.strong && styles.wikiStrong]} onPress={() => openLink(part.url!)}>{part.text}</Text> : <Text key={index} style={part.strong ? styles.wikiStrong : undefined}>{part.text}</Text>)}{linkError ? <Text accessibilityLabel="链接打开失败" style={styles.wikiLinkError}>链接打开失败</Text> : null}</>;
 }
 
 function MembersPanel({ serverId }: Props) {

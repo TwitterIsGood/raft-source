@@ -1,5 +1,5 @@
-import * as Device from "expo-device";
 import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
 import { API_BASE_URL } from "./config";
 import { createSessionStorage } from "./sessionStorage";
 
@@ -9,7 +9,10 @@ const INSTALLATION = "raft.installationId";
 
 // Only an unsigned simulator build pointed at the isolated test API may use
 // an in-memory session. Physical devices always use SecureStore.
-const isolatedSimulator = !Device.isDevice && API_BASE_URL === "http://127.0.0.1:13074";
+// The unsigned iOS Simulator Release may report Device.isDevice inconsistently.
+// The loopback-only isolated API is unreachable from a physical device, so this
+// address is a safe and explicit boundary for the in-memory test session.
+const isolatedSimulator = Platform.OS === "ios" && API_BASE_URL === "http://127.0.0.1:13074";
 const storage = createSessionStorage(SecureStore, isolatedSimulator);
 
 let sessionGeneration = 0;
