@@ -6,6 +6,36 @@ export type WikiBlock =
   | { kind: "image"; alt: string; url: string }
   | { kind: "code"; text: string };
 
+/** Markdown URLs accepted by the mobile Wiki surface.
+ *
+ * Relative paths are kept as relative values so callers can resolve them
+ * against the page's asset origin. Protocol URLs are limited to http(s); this
+ * prevents javascript:, data:, and other schemes from reaching native URL or
+ * image handlers.
+ */
+export function isSafeWikiUrl(value: string): boolean {
+  if (!value || /[\u0000-\u001f\u007f\s]/.test(value)) return false;
+  if (value.startsWith("//") || value.includes("\\")) return false;
+  if (/^[a-z][a-z\d+.-]*:/i.test(value)) return /^https?:\/\//i.test(value);
+  return true;
+}
+
+export function isWikiExternalUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+export function resolveWikiAssetUrl(value: string, baseUrl: string): string {
+  if (!isSafeWikiUrl(value)) return "";
+  if (isWikiExternalUrl(value)) return value;
+  try {
+    const base = new URL(`${baseUrl.replace(/\/+$/, "")}/`);
+    const resolved = new URL(value, base);
+    return resolved.origin === base.origin ? resolved.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
 /** Dependency-free Markdown subset for the mobile Wiki surface. */
 export function parseWikiBlocks(source: string): WikiBlock[] {
   const lines = source.replace(/\r\n?/g, "\n").split("\n");
@@ -26,8 +56,8 @@ export function parseWikiBlocks(source: string): WikiBlock[] {
     if (code) { code.push(line); continue; }
     const trimmed = line.trim();
     if (!trimmed) { flushParagraph(); continue; }
-    const image = trimmed.match(/^!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)$/);
-    if (image) { flushParagraph(); blocks.push({ kind: "image", alt: image[1], url: image[2] }); continue; }
+    const image = trimmed.match(/^!\[([^\]]*)\]\(([^\s)]+)\)$/);
+    if (image && isSafeWikiUrl(image[2])) { flushParagraph(); blocks.push({ kind: "image", alt: image[1], url: image[2] }); continue; }
     const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
     if (heading) { flushParagraph(); blocks.push({ kind: "heading", level: heading[1].length, text: heading[2] }); continue; }
     const bullet = trimmed.match(/^[-*+]\s+(.+)$/);
@@ -45,12 +75,13 @@ export type WikiInlinePart = { text: string; url?: string; strong?: boolean };
 
 export function splitWikiInline(text: string): WikiInlinePart[] {
   const parts: WikiInlinePart[] = [];
-  const pattern = /\[([^\]]+)\]\(((?:https?:\/\/|\/)[^\s)]+)\)|\*\*([^*]+)\*\*|__([^_]+)__/g;
+  const pattern = /\[([^\]]+)\]\(([^\s)]+)\)|\*\*([^*]+)\*\*|__([^_]+)__/g;
   let cursor = 0;
   for (const match of text.matchAll(pattern)) {
     const index = match.index ?? 0;
     if (index > cursor) parts.push({ text: text.slice(cursor, index) });
-    if (match[1] !== undefined) parts.push({ text: match[1], url: match[2] });
+    if (match[1] !== undefined && isSafeWikiUrl(match[2])) parts.push({ text: match[1], url: match[2] });
+    else if (match[1] !== undefined) parts.push({ text: match[0] });
     else parts.push({ text: match[3] ?? match[4] ?? "", strong: true });
     cursor = index + match[0].length;
   }
