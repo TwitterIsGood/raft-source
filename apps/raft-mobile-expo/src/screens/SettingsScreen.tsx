@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { getPushRegistrationState, registerForPush, unregisterForPush, type PushRegistrationState } from "../push";
 import { getCurrentUser, getServerNotificationSettings, updateCurrentUser, updateServerNotificationSettings, type MobileUser, type ServerNotificationSettings, type ServerPushMode } from "../settingsApi";
 
@@ -16,6 +16,7 @@ const MODE_OPTIONS: ReadonlyArray<{ mode: ServerPushMode; title: string; descrip
 ];
 
 export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
+  const scrollRef = useRef<ScrollView>(null);
   const [user, setUser] = useState<MobileUser | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [savedDisplayName, setSavedDisplayName] = useState("");
@@ -28,6 +29,16 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  // Password inputs sit near the bottom of a long settings page. Scroll only
+  // far enough for the focused field to clear the keyboard; scrolling to the
+  // absolute end would hide the earlier fields while they remain focused.
+  const revealPasswordField = useCallback((field: "current" | "new" | "confirm") => {
+    const scroll = scrollRef.current;
+    if (!scroll) return;
+    const offset = field === "current" ? 0 : field === "new" ? 80 : 106;
+    setTimeout(() => scroll.scrollTo({ y: offset, animated: true }), 80);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -125,7 +136,8 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
 
   if (loading) return <View style={styles.center}><ActivityIndicator color="#365FE8" /></View>;
 
-  return <ScrollView style={styles.root} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+  return <KeyboardAvoidingView style={styles.keyboardRoot} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+  <ScrollView ref={scrollRef} style={styles.root} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}>
     <View style={styles.titleRow}><Text style={styles.title}>设置</Text><Pressable accessibilityRole="button" accessibilityLabel="返回消息" onPress={onBack}><Text style={styles.link}>返回</Text></Pressable></View>
     {error ? <View style={styles.error}><Text style={styles.errorText}>{error}</Text></View> : null}
     {message ? <View style={styles.message}><Text style={styles.messageText}>{message}</Text></View> : null}
@@ -140,9 +152,9 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
       <TextInput accessibilityLabel="显示名称" value={displayName} onChangeText={setDisplayName} style={styles.input} maxLength={120} />
       <Pressable accessibilityRole="button" accessibilityLabel="保存账号资料" disabled={busy || !displayName.trim() || displayName.trim() === savedDisplayName} onPress={() => void saveProfile()} style={[styles.primary, (busy || !displayName.trim() || displayName.trim() === savedDisplayName) && styles.disabled]}><Text style={styles.primaryText}>保存资料</Text></Pressable>
       <Text style={styles.label}>修改密码</Text>
-      <TextInput accessibilityLabel="当前密码" value={currentPassword} onChangeText={setCurrentPassword} placeholder="当前密码" secureTextEntry style={styles.input} />
-      <TextInput accessibilityLabel="新密码" value={newPassword} onChangeText={setNewPassword} placeholder="新密码（至少 8 个字符）" secureTextEntry style={styles.input} />
-      <TextInput accessibilityLabel="确认新密码" value={confirmPassword} onChangeText={setConfirmPassword} placeholder="再次输入新密码" secureTextEntry style={styles.input} />
+      <TextInput accessibilityLabel="当前密码" value={currentPassword} onChangeText={setCurrentPassword} onFocus={() => revealPasswordField("current")} placeholder="当前密码" secureTextEntry style={styles.input} />
+      <TextInput accessibilityLabel="新密码" value={newPassword} onChangeText={setNewPassword} onFocus={() => revealPasswordField("new")} placeholder="新密码（至少 8 个字符）" secureTextEntry style={styles.input} />
+      <TextInput accessibilityLabel="确认新密码" value={confirmPassword} onChangeText={setConfirmPassword} onFocus={() => revealPasswordField("confirm")} placeholder="再次输入新密码" secureTextEntry style={styles.input} />
       <Pressable accessibilityRole="button" accessibilityLabel="保存新密码" disabled={busy || !currentPassword || !newPassword || !confirmPassword} onPress={() => void savePassword()} style={[styles.secondary, (busy || !currentPassword || !newPassword || !confirmPassword) && styles.disabled]}><Text style={styles.secondaryText}>更新密码</Text></Pressable>
     </View>
 
@@ -159,9 +171,10 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
     </View>
 
     <View style={styles.card}><Text style={styles.sectionTitle}>会话</Text><Pressable accessibilityRole="button" accessibilityLabel="退出登录" onPress={onLogout} style={styles.danger}><Text style={styles.dangerText}>退出登录</Text></Pressable></View>
-  </ScrollView>;
+  </ScrollView>
+  </KeyboardAvoidingView>;
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#F6F8FB" }, content: { padding: 16, paddingBottom: 40, gap: 14 }, center: { flex: 1, alignItems: "center", justifyContent: "center" }, titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, title: { color: "#17212F", fontSize: 24, fontWeight: "700" }, link: { color: "#365FE8", fontWeight: "700" }, card: { borderWidth: 1, borderColor: "#E5EAF0", borderRadius: 12, backgroundColor: "#FFF", padding: 16, gap: 8 }, sectionTitle: { color: "#17212F", fontSize: 18, fontWeight: "700", marginBottom: 4 }, label: { color: "#718096", fontSize: 12, marginTop: 4 }, value: { color: "#17212F", fontSize: 15 }, input: { minHeight: 44, borderWidth: 1, borderColor: "#CBD5E0", borderRadius: 8, paddingHorizontal: 10, color: "#17212F", fontSize: 16 }, description: { color: "#718096", fontSize: 12, lineHeight: 18 }, primary: { minHeight: 44, borderRadius: 8, backgroundColor: "#365FE8", alignItems: "center", justifyContent: "center", marginTop: 4 }, primaryText: { color: "#FFF", fontWeight: "700" }, secondary: { minHeight: 42, borderWidth: 1, borderColor: "#365FE8", borderRadius: 8, paddingHorizontal: 12, alignItems: "center", justifyContent: "center" }, secondaryText: { color: "#365FE8", fontWeight: "700" }, actions: { flexDirection: "row", gap: 8, marginTop: 4 }, option: { borderWidth: 1, borderColor: "#E5EAF0", borderRadius: 8, padding: 10, marginTop: 4 }, optionSelected: { borderColor: "#365FE8", backgroundColor: "#E8EEFF" }, optionTitleRow: { flexDirection: "row", justifyContent: "space-between" }, optionTitle: { color: "#17212F", fontWeight: "700" }, radio: { color: "#365FE8", fontSize: 18 }, error: { padding: 10, borderRadius: 8, backgroundColor: "#FEE2E2" }, errorText: { color: "#991B1B", fontSize: 13 }, message: { padding: 10, borderRadius: 8, backgroundColor: "#DCFCE7" }, messageText: { color: "#166534", fontSize: 13 }, danger: { minHeight: 44, borderWidth: 1, borderColor: "#B91C1C", borderRadius: 8, alignItems: "center", justifyContent: "center" }, dangerText: { color: "#B91C1C", fontWeight: "700" }, disabled: { opacity: 0.45 },
+  keyboardRoot: { flex: 1 }, root: { flex: 1, backgroundColor: "#F6F8FB" }, content: { padding: 16, paddingBottom: 40, gap: 14 }, center: { flex: 1, alignItems: "center", justifyContent: "center" }, titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, title: { color: "#17212F", fontSize: 24, fontWeight: "700" }, link: { color: "#365FE8", fontWeight: "700" }, card: { borderWidth: 1, borderColor: "#E5EAF0", borderRadius: 12, backgroundColor: "#FFF", padding: 16, gap: 8 }, sectionTitle: { color: "#17212F", fontSize: 18, fontWeight: "700", marginBottom: 4 }, label: { color: "#718096", fontSize: 12, marginTop: 4 }, value: { color: "#17212F", fontSize: 15 }, input: { minHeight: 44, borderWidth: 1, borderColor: "#CBD5E0", borderRadius: 8, paddingHorizontal: 10, color: "#17212F", fontSize: 16 }, description: { color: "#718096", fontSize: 12, lineHeight: 18 }, primary: { minHeight: 44, borderRadius: 8, backgroundColor: "#365FE8", alignItems: "center", justifyContent: "center", marginTop: 4 }, primaryText: { color: "#FFF", fontWeight: "700" }, secondary: { minHeight: 42, borderWidth: 1, borderColor: "#365FE8", borderRadius: 8, paddingHorizontal: 12, alignItems: "center", justifyContent: "center" }, secondaryText: { color: "#365FE8", fontWeight: "700" }, actions: { flexDirection: "row", gap: 8, marginTop: 4 }, option: { borderWidth: 1, borderColor: "#E5EAF0", borderRadius: 8, padding: 10, marginTop: 4 }, optionSelected: { borderColor: "#365FE8", backgroundColor: "#E8EEFF" }, optionTitleRow: { flexDirection: "row", justifyContent: "space-between" }, optionTitle: { color: "#17212F", fontWeight: "700" }, radio: { color: "#365FE8", fontSize: 18 }, error: { padding: 10, borderRadius: 8, backgroundColor: "#FEE2E2" }, errorText: { color: "#991B1B", fontSize: 13 }, message: { padding: 10, borderRadius: 8, backgroundColor: "#DCFCE7" }, messageText: { color: "#166534", fontSize: 13 }, danger: { minHeight: 44, borderWidth: 1, borderColor: "#B91C1C", borderRadius: 8, alignItems: "center", justifyContent: "center" }, dangerText: { color: "#B91C1C", fontWeight: "700" }, disabled: { opacity: 0.45 },
 });
