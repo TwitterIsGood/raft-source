@@ -278,19 +278,32 @@ export default function App() {
       if (cancelled || sessionEpochRef.current !== epoch) return;
       if (!scopeIsCurrent(serverId, channelId, epoch) || requestId !== activeRequestRef.current) return;
       const rows = result.messages.map(normalize);
-      messageCacheRef.current.merge(serverId, rows);
-      const next = messageCacheRef.current.get(serverId, channelId);
-      setMessages(next);
       const targetMessageId = focusMessageId ? ((result as Awaited<ReturnType<typeof getMessageContext>>).targetMessageId ?? focusMessageId) : null;
+      if (focusMessageId) {
+        // A context response is already a bounded window around the target. Keep
+        // that window as the rendered data so the target stays in the first
+        // render batch. Merging it into the full cache before rendering can put
+        // an old target beyond FlatList's initial window and previously required
+        // scrollToIndex during a mount, which crashed the iOS Simulator.
+        const focusedRows = [...rows].sort((a, b) => (b.seq ?? 0) - (a.seq ?? 0));
+        const targetPresent = focusedRows.some((message) => message.id === targetMessageId);
+        if (!targetPresent) {
+          setMessages([]);
+          setHighlightedMessageId(null);
+          setHasOlder(false);
+          setLoading(false);
+          setError("消息不存在或无权访问");
+          return;
+        }
+        messageCacheRef.current.merge(serverId, focusedRows);
+        setMessages(focusedRows);
+      } else {
+        messageCacheRef.current.merge(serverId, rows);
+        setMessages(messageCacheRef.current.get(serverId, channelId));
+      }
       setHighlightedMessageId(targetMessageId);
       setHasOlder("hasOlder" in result ? Boolean(result.hasOlder) : rows.length >= 50 && !result.historyLimited);
       setLoading(false);
-      if (targetMessageId) {
-        setTimeout(() => {
-          const index = messageCacheRef.current.get(serverId, channelId).findIndex((message) => message.id === targetMessageId);
-          if (index >= 0) list.current?.scrollToIndex({ index, animated: false, viewPosition: 0.5 });
-        }, 0);
-      }
     }).catch((e) => { if (!cancelled && sessionEpochRef.current === epoch) { report(e); setLoading(false); } });
     return () => { cancelled = true; };
   }, [server, active]);
