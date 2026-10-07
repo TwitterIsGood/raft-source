@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { getPushRegistrationState, registerForPush, unregisterForPush, type PushRegistrationState } from "../push";
 import { getCurrentUser, getServerNotificationSettings, updateCurrentUser, updateServerNotificationSettings, type MobileUser, type ServerNotificationSettings, type ServerPushMode } from "../settingsApi";
 
@@ -9,6 +9,8 @@ type Props = {
   onLogout: () => void;
 };
 
+type PasswordField = "current" | "new" | "confirm";
+
 const MODE_OPTIONS: ReadonlyArray<{ mode: ServerPushMode; title: string; description: string }> = [
   { mode: "all", title: "全部消息", description: "接收当前工作区的普通消息和提及。" },
   { mode: "mentions", title: "仅提及", description: "只接收提及你的消息。" },
@@ -17,6 +19,17 @@ const MODE_OPTIONS: ReadonlyArray<{ mode: ServerPushMode; title: string; descrip
 
 export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
   const scrollRef = useRef<ScrollView>(null);
+  const passwordRefs = {
+    current: useRef<TextInput>(null),
+    new: useRef<TextInput>(null),
+    confirm: useRef<TextInput>(null),
+  };
+  const savePasswordRef = useRef<any>(null);
+  const scrollOffsetRef = useRef(0);
+  const activePasswordFieldRef = useRef<PasswordField | null>(null);
+  const focusGenerationRef = useRef(0);
+  const keyboardTopRef = useRef<number | null>(null);
+  const pendingRevealRef = useRef<number | null>(null);
   const [user, setUser] = useState<MobileUser | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [savedDisplayName, setSavedDisplayName] = useState("");
@@ -30,15 +43,55 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  // Password inputs sit near the bottom of a long settings page. Scroll only
-  // far enough for the focused field to clear the keyboard; scrolling to the
-  // absolute end would hide the earlier fields while they remain focused.
-  const revealPasswordField = useCallback((field: "current" | "new" | "confirm") => {
+  // Password fields sit near the bottom of a long settings page. Measure the
+  // focused field and save button after the keyboard frame settles, then move
+  // only by the overlap with the keyboard. This stays correct when validation
+  // text, font metrics, or a long email changes the field's actual position.
+  const revealPasswordField = useCallback((field: PasswordField, keyboardTopOverride?: number) => {
     const scroll = scrollRef.current;
-    if (!scroll) return;
-    const offset = field === "current" ? 0 : field === "new" ? 80 : 106;
-    setTimeout(() => scroll.scrollTo({ y: offset, animated: true }), 80);
+    const keyboardTop = keyboardTopOverride ?? keyboardTopRef.current;
+    const generation = ++focusGenerationRef.current;
+    if (!scroll || keyboardTop == null) return;
+    if (pendingRevealRef.current != null) cancelAnimationFrame(pendingRevealRef.current);
+    pendingRevealRef.current = requestAnimationFrame(() => {
+      pendingRevealRef.current = null;
+      if (generation !== focusGenerationRef.current || activePasswordFieldRef.current !== field) return;
+      const nodes = [passwordRefs[field].current, savePasswordRef.current].filter((node): node is { measureInWindow: (callback: (x: number, y: number, width: number, height: number) => void) => void } => Boolean(node));
+      if (nodes.length === 0) return;
+      const safeTop = keyboardTop - 12;
+      let remaining = nodes.length;
+      let maxOverlap = 0;
+      for (const node of nodes) {
+        node.measureInWindow((_x, y, _width, height) => {
+          if (generation !== focusGenerationRef.current || activePasswordFieldRef.current !== field) return;
+          maxOverlap = Math.max(maxOverlap, y + height - safeTop);
+          remaining -= 1;
+          if (remaining === 0 && maxOverlap > 0) {
+            scroll.scrollTo({ y: Math.max(0, scrollOffsetRef.current + maxOverlap), animated: true });
+          }
+        });
+      }
+    });
   }, []);
+
+  useEffect(() => {
+    const updateKeyboardTop = (event: { endCoordinates?: { screenY?: number } }) => {
+      const screenY = event.endCoordinates?.screenY;
+      keyboardTopRef.current = typeof screenY === "number" && screenY > 0 ? screenY : null;
+      const field = activePasswordFieldRef.current;
+      if (field && keyboardTopRef.current != null) revealPasswordField(field, keyboardTopRef.current);
+    };
+    const clearKeyboardTop = () => { keyboardTopRef.current = null; };
+    const subscriptions = [
+      Keyboard.addListener("keyboardWillChangeFrame", updateKeyboardTop),
+      Keyboard.addListener("keyboardDidShow", updateKeyboardTop),
+      Keyboard.addListener("keyboardDidHide", clearKeyboardTop),
+    ];
+    return () => {
+      subscriptions.forEach((subscription) => subscription.remove());
+      if (pendingRevealRef.current != null) cancelAnimationFrame(pendingRevealRef.current);
+    };
+  }, [revealPasswordField]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -137,7 +190,7 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
   if (loading) return <View style={styles.center}><ActivityIndicator color="#365FE8" /></View>;
 
   return <KeyboardAvoidingView style={styles.keyboardRoot} behavior={Platform.OS === "ios" ? "padding" : "height"}>
-  <ScrollView ref={scrollRef} style={styles.root} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}>
+  <ScrollView ref={scrollRef} style={styles.root} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" automaticallyAdjustKeyboardInsets={false} onScroll={(event) => { scrollOffsetRef.current = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={16}>
     <View style={styles.titleRow}><Text style={styles.title}>设置</Text><Pressable accessibilityRole="button" accessibilityLabel="返回消息" onPress={onBack}><Text style={styles.link}>返回</Text></Pressable></View>
     {error ? <View style={styles.error}><Text style={styles.errorText}>{error}</Text></View> : null}
     {message ? <View style={styles.message}><Text style={styles.messageText}>{message}</Text></View> : null}
@@ -152,10 +205,10 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
       <TextInput accessibilityLabel="显示名称" value={displayName} onChangeText={setDisplayName} style={styles.input} maxLength={120} />
       <Pressable accessibilityRole="button" accessibilityLabel="保存账号资料" disabled={busy || !displayName.trim() || displayName.trim() === savedDisplayName} onPress={() => void saveProfile()} style={[styles.primary, (busy || !displayName.trim() || displayName.trim() === savedDisplayName) && styles.disabled]}><Text style={styles.primaryText}>保存资料</Text></Pressable>
       <Text style={styles.label}>修改密码</Text>
-      <TextInput accessibilityLabel="当前密码" value={currentPassword} onChangeText={setCurrentPassword} onFocus={() => revealPasswordField("current")} placeholder="当前密码" secureTextEntry style={styles.input} />
-      <TextInput accessibilityLabel="新密码" value={newPassword} onChangeText={setNewPassword} onFocus={() => revealPasswordField("new")} placeholder="新密码（至少 8 个字符）" secureTextEntry style={styles.input} />
-      <TextInput accessibilityLabel="确认新密码" value={confirmPassword} onChangeText={setConfirmPassword} onFocus={() => revealPasswordField("confirm")} placeholder="再次输入新密码" secureTextEntry style={styles.input} />
-      <Pressable accessibilityRole="button" accessibilityLabel="保存新密码" disabled={busy || !currentPassword || !newPassword || !confirmPassword} onPress={() => void savePassword()} style={[styles.secondary, (busy || !currentPassword || !newPassword || !confirmPassword) && styles.disabled]}><Text style={styles.secondaryText}>更新密码</Text></Pressable>
+      <TextInput ref={passwordRefs.current} accessibilityLabel="当前密码" value={currentPassword} onChangeText={setCurrentPassword} onFocus={() => { activePasswordFieldRef.current = "current"; revealPasswordField("current"); }} placeholder="当前密码" secureTextEntry style={styles.input} />
+      <TextInput ref={passwordRefs.new} accessibilityLabel="新密码" value={newPassword} onChangeText={setNewPassword} onFocus={() => { activePasswordFieldRef.current = "new"; revealPasswordField("new"); }} placeholder="新密码（至少 8 个字符）" secureTextEntry style={styles.input} />
+      <TextInput ref={passwordRefs.confirm} accessibilityLabel="确认新密码" value={confirmPassword} onChangeText={setConfirmPassword} onFocus={() => { activePasswordFieldRef.current = "confirm"; revealPasswordField("confirm"); }} placeholder="再次输入新密码" secureTextEntry style={styles.input} />
+      <Pressable ref={savePasswordRef} accessibilityRole="button" accessibilityLabel="保存新密码" disabled={busy || !currentPassword || !newPassword || !confirmPassword} onPress={() => void savePassword()} style={[styles.secondary, (busy || !currentPassword || !newPassword || !confirmPassword) && styles.disabled]}><Text style={styles.secondaryText}>更新密码</Text></Pressable>
     </View>
 
     <View style={styles.card} accessibilityLabel="通知设置">
