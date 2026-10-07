@@ -146,7 +146,7 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
 
   const savePassword = async () => {
     if (!currentPassword || newPassword.length < 8 || newPassword !== confirmPassword) {
-      setError(newPassword.length < 8 ? "新密码至少需要 8 个字符。" : "两次输入的新密码不一致。 ");
+      setError(newPassword.length < 8 ? "新密码至少需要 8 个字符。" : "两次输入的新密码不一致。");
       return;
     }
     setBusy(true); setError(null); setMessage(null);
