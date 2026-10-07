@@ -106,3 +106,26 @@ test('stale guarded save is cleared in its queue slot before a newer save', asyn
   await fresh;
   assert.deepEqual(values, new Map([['access', 'new-a'], ['refresh', 'new-r']]));
 });
+
+test('stale guarded save settles both writes before clearing after one write fails', async () => {
+  const values = new Map();
+  let releaseRefresh;
+  const refreshGate = new Promise((resolve) => { releaseRefresh = resolve; });
+  const secure = {
+    async getItemAsync(key) { return values.get(key) ?? null; },
+    async setItemAsync(key, value) {
+      if (key === 'access') throw new Error('access failed');
+      await refreshGate;
+      values.set(key, value);
+    },
+    async deleteItemAsync(key) { values.delete(key); },
+  };
+  const session = createSessionStorage(secure, false);
+  let current = true;
+  const saving = session.save('access', 'refresh', 'old-a', 'old-r', () => current);
+  await new Promise((resolve) => setImmediate(resolve));
+  current = false;
+  releaseRefresh();
+  await assert.rejects(saving, /access failed/);
+  assert.deepEqual(values, new Map());
+});

@@ -41,16 +41,30 @@ export function createSessionStorage(secure: SecureStorage, isolatedSimulator: b
       if (isolatedSimulator) { if (guard?.() === false) return; access = accessToken; refresh = refreshToken; return; }
       await enqueue(async () => {
         if (guard?.() === false) return;
-        await settlePair([
-          secure.setItemAsync(accessKey, accessToken),
-          secure.setItemAsync(refreshKey, refreshToken),
-        ]);
+        let writeError: unknown;
+        try {
+          await settlePair([
+            secure.setItemAsync(accessKey, accessToken),
+            secure.setItemAsync(refreshKey, refreshToken),
+          ]);
+        } catch (error) {
+          writeError = error;
+        }
         // If the request became stale while SecureStore was writing, clear
         // inside this queue slot. A newer save queued after us then runs next.
-        if (guard?.() === false) await settlePair([
-          secure.deleteItemAsync(accessKey),
-          secure.deleteItemAsync(refreshKey),
-        ]);
+        let cleanupError: unknown;
+        if (guard?.() === false) {
+          try {
+            await settlePair([
+              secure.deleteItemAsync(accessKey),
+              secure.deleteItemAsync(refreshKey),
+            ]);
+          } catch (error) {
+            cleanupError = error;
+          }
+        }
+        if (writeError) throw writeError;
+        if (cleanupError) throw cleanupError;
       });
     },
     async clear(accessKey: string, refreshKey: string) {
