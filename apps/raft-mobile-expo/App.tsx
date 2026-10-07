@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, AppState, FlatList, Image, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import { StatusBar } from "expo-status-bar";
-import { api, apiMultipart, forgotPassword, getChannel, getChannelMembers, getChannels, getDMs, getMessageContext, getMessages, getOrCreateThread, getServers, login, logoutRemote, register, sendMessage } from "./src/api";
+import { api, apiMultipart, completeProfile, forgotPassword, getChannel, getChannelMembers, getChannels, getDMs, getMessageContext, getMessages, getOrCreateThread, getServers, login, logoutRemote, register, sendMessage } from "./src/api";
 import { bumpSessionGeneration, clearSession, getSessionGeneration, readSession } from "./src/session";
 import { registerForPush, subscribeToNotificationTap, unregisterForPush } from "./src/push";
 import { createRaftSocket } from "./src/socket";
@@ -50,6 +50,11 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false);
   const [forgotSent, setForgotSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [profileSetupRequired, setProfileSetupRequired] = useState(false);
+  const [profileName, setProfileName] = useState("");
+  const [profileDisplayName, setProfileDisplayName] = useState("");
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [authRefresh, setAuthRefresh] = useState(0);
   const [servers, setServers] = useState<Server[]>([]);
   const [server, setServer] = useState<Server | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -95,6 +100,13 @@ export default function App() {
   const draftsRef = useRef<Record<string, string>>({});
   const composerSnapshotRef = useRef<{ channelId: string | null; draft: string; attachmentIds: readonly string[]; mentionKeys: readonly string[] }>({ channelId: null, draft: "", attachmentIds: [], mentionKeys: [] });
   const [notice, setNotice] = useState("");
+  const profileRequestRef = useRef(0);
+  // Keep an imperative copy of auth fields as well as React state.  Native
+  // secure inputs can deliver the final automation keystroke just after the
+  // submit press, so relying only on the render closure can submit a stale
+  // password even though the field visibly contains the new value.
+  const emailInputRef = useRef("");
+  const passwordInputRef = useRef("");
 
   const draft = active ? drafts[active.id] || "" : "";
   const attachmentIds = uploadedAttachments.map((attachment) => attachment.id);
@@ -166,9 +178,18 @@ export default function App() {
       if (sessionEpochRef.current !== epoch) return;
       serversRef.current = rows;
       setServers(rows);
+      setProfileSetupRequired(false);
       setServer((current) => rows.find((row) => row.id === navigationRef.current?.serverId) ?? (current && rows.some((row) => row.id === current.id) ? current : rows[0] ?? null));
-    }).catch((e) => { if (sessionEpochRef.current === epoch) report(e); });
-  }, [loggedIn]);
+    }).catch((e) => {
+      if (sessionEpochRef.current !== epoch) return;
+      const message = e instanceof Error ? e.message : String(e);
+      if (message.includes("PROFILE_SETUP_REQUIRED")) {
+        setProfileSetupRequired(true);
+        setServer(null);
+        setError(null);
+      } else report(e);
+    });
+  }, [loggedIn, authRefresh]);
   useEffect(() => {
     if (!server) return;
     const epoch = sessionEpochRef.current;
@@ -381,18 +402,43 @@ export default function App() {
   const submitLogin = async () => {
     setError(null); setAuthBusy(true);
     try {
-      if (!validEmail(email.trim())) throw new Error("请输入有效邮箱地址。");
-      if (authMode === "login" && !password) throw new Error("请输入密码。");
-      if (authMode === "register" && password.length < 8) throw new Error("密码至少需要 8 个字符。");
-      if (authMode === "login") { await login(email.trim(), password); sessionEpochRef.current = getSessionGeneration(); setLoggedIn(true); }
+      // Native secure fields can deliver the final automation keystroke just
+      // after the button press. Let the event queue flush before taking the
+      // imperative values used for the request.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const currentEmail = (emailInputRef.current || email).trim();
+      const currentPassword = passwordInputRef.current || password;
+      if (!validEmail(currentEmail)) throw new Error("请输入有效邮箱地址。");
+      if (authMode === "login" && !currentPassword) throw new Error("请输入密码。");
+      if (authMode === "register" && currentPassword.length < 8) throw new Error("密码至少需要 8 个字符。");
+      if (authMode === "login") { await login(currentEmail, currentPassword); sessionEpochRef.current = getSessionGeneration(); setLoggedIn(true); }
       else if (authMode === "register") {
         if (!acceptedLegal) throw new Error("创建账号前需要同意服务条款并确认隐私政策。");
-        await register(email.trim(), password); sessionEpochRef.current = getSessionGeneration(); setLoggedIn(true);
-      } else { await forgotPassword(email.trim()); setForgotSent(true); }
+        await register(currentEmail, currentPassword); sessionEpochRef.current = getSessionGeneration(); setLoggedIn(true);
+      } else { await forgotPassword(currentEmail); setForgotSent(true); }
     } catch (e) { report(e); }
     finally { setAuthBusy(false); }
   };
+  const submitProfileSetup = async () => {
+    const name = profileName.trim();
+    if (name.length < 5) { setError("用户名至少需要 5 个字符。"); return; }
+    const epoch = sessionEpochRef.current;
+    const requestId = ++profileRequestRef.current;
+    setProfileBusy(true); setError(null);
+    try {
+      await completeProfile(name, profileDisplayName.trim() || name);
+      if (sessionEpochRef.current !== epoch || profileRequestRef.current !== requestId) return;
+      setProfileSetupRequired(false);
+      setAuthRefresh((value) => value + 1);
+    } catch (e) {
+      if (sessionEpochRef.current === epoch && profileRequestRef.current === requestId) report(e);
+    }
+    finally {
+      if (sessionEpochRef.current === epoch && profileRequestRef.current === requestId) setProfileBusy(false);
+    }
+  };
   const logout = async () => {
+    ++profileRequestRef.current;
     bumpSessionGeneration();
     sessionEpochRef.current = getSessionGeneration();
     const currentServer = server;
@@ -418,6 +464,9 @@ export default function App() {
     messageCacheRef.current.clear();
     serverCursorRef.current.clear();
     setLoggedIn(false);
+    setProfileSetupRequired(false);
+    setProfileName("");
+    setProfileDisplayName("");
     setServer(null);
     setActive(null);
     setUploading(false);
@@ -565,14 +614,31 @@ export default function App() {
             {forgotSent ? <Text style={styles.authDescription}>如果 <Text style={styles.authStrong}>{email}</Text> 已注册，我们已发送密码重置链接。</Text> : null}
             {error ? <View style={styles.authBanner}><Text style={styles.authBannerText}>{error}</Text></View> : null}
             {!forgotSent ? <>
-              <View style={styles.authField}><Text style={styles.authLabel}>邮箱</Text><TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" textContentType="username" autoComplete="email" style={styles.authInput} /></View>
-              {authMode !== "forgot" ? <View style={styles.authField}><Text style={styles.authLabel}>密码</Text><TextInput value={password} onChangeText={setPassword} placeholder={authMode === "register" ? "至少 8 个字符" : undefined} secureTextEntry textContentType={authMode === "register" ? "newPassword" : "password"} autoComplete={authMode === "register" ? "password-new" : "password"} style={styles.authInput} /></View> : null}
+              <View style={styles.authField}><Text style={styles.authLabel}>邮箱</Text><TextInput value={email} onChangeText={(value) => { emailInputRef.current = value; setEmail(value); }} onEndEditing={(event) => { emailInputRef.current = event.nativeEvent.text; }} autoCapitalize="none" keyboardType="email-address" textContentType="username" autoComplete="email" style={styles.authInput} /></View>
+              {authMode !== "forgot" ? <View style={styles.authField}><Text style={styles.authLabel}>密码</Text><TextInput value={password} onChangeText={(value) => { passwordInputRef.current = value; setPassword(value); }} onEndEditing={(event) => { passwordInputRef.current = event.nativeEvent.text; }} placeholder={authMode === "register" ? "至少 8 个字符" : undefined} secureTextEntry textContentType={authMode === "register" ? "newPassword" : "password"} autoComplete={authMode === "register" ? "password-new" : "password"} style={styles.authInput} /></View> : null}
               {authMode === "register" ? <Pressable style={styles.legalRow} onPress={() => setAcceptedLegal((value) => !value)}><View style={[styles.checkbox, acceptedLegal && styles.checkboxChecked]}>{acceptedLegal ? <Text style={styles.checkmark}>✓</Text> : null}</View><Text style={styles.legalText}>我同意 <Text style={styles.authLinkInline} onPress={() => void Linking.openURL("https://raft.build/terms")}>服务条款</Text> 并确认 <Text style={styles.authLinkInline} onPress={() => void Linking.openURL("https://raft.build/privacy")}>隐私政策</Text>。</Text></Pressable> : null}
               <Pressable style={[styles.authPrimary, (authBusy || (authMode === "register" && !acceptedLegal)) && styles.authDisabled]} disabled={authBusy || (authMode === "register" && !acceptedLegal)} onPress={() => void submitLogin()}><Text style={styles.authPrimaryText}>{authBusy ? authMode === "forgot" ? "发送中…" : authMode === "register" ? "创建账号中…" : "登录中…" : authMode === "forgot" ? "发送重置链接" : authMode === "register" ? "继续" : "登录"}</Text></Pressable>
             </> : null}
             {authMode === "login" ? <><Text style={styles.legalAgreement}>继续即表示你同意 <Text style={styles.authLinkInline} onPress={() => void Linking.openURL("https://raft.build/terms")}>服务条款</Text> 和 <Text style={styles.authLinkInline} onPress={() => void Linking.openURL("https://raft.build/privacy")}>隐私政策</Text>。</Text><Pressable onPress={() => switchAuth("forgot")}><Text style={styles.authLink}>忘记密码？</Text></Pressable><Text style={styles.authPrompt}>还没有账号？<Text style={styles.authLinkInline} onPress={() => switchAuth("register")}>创建一个</Text></Text></> : null}
             {authMode === "register" ? <Text style={styles.authPrompt}>已有账号？<Text style={styles.authLinkInline} onPress={() => switchAuth("login")}>登录</Text></Text> : null}
             {authMode === "forgot" ? <Pressable onPress={() => switchAuth("login")}><Text style={styles.authLink}>返回登录</Text></Pressable> : null}
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>;
+  }
+  if (profileSetupRequired) {
+    return <SafeAreaView style={styles.authShell}><StatusBar style="dark" />
+      <View style={styles.authTopBar}><Image source={require("./assets/raft-logo.png")} style={styles.authLogo} resizeMode="contain" /></View>
+      <KeyboardAvoidingView style={styles.authFlex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView contentContainerStyle={styles.authContent} keyboardShouldPersistTaps="handled">
+          <View style={styles.authForm}>
+            <Text style={styles.authTitle}>完善你的资料</Text>
+            <Text style={styles.authDescription}>首次登录需要设置一个用户名，完成后即可进入工作区。</Text>
+            {error ? <View style={styles.authBanner}><Text style={styles.authBannerText}>{error}</Text></View> : null}
+            <View style={styles.authField}><Text style={styles.authLabel}>用户名</Text><TextInput value={profileName} onChangeText={setProfileName} autoCapitalize="none" autoCorrect={false} style={styles.authInput} accessibilityLabel="用户名" /></View>
+            <View style={styles.authField}><Text style={styles.authLabel}>显示名称（可选）</Text><TextInput value={profileDisplayName} onChangeText={setProfileDisplayName} style={styles.authInput} accessibilityLabel="显示名称" /></View>
+            <Pressable style={[styles.authPrimary, (profileBusy || profileName.trim().length < 5) && styles.authDisabled]} disabled={profileBusy || profileName.trim().length < 5} onPress={() => void submitProfileSetup()}><Text style={styles.authPrimaryText}>{profileBusy ? "保存中…" : "完成设置"}</Text></Pressable>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

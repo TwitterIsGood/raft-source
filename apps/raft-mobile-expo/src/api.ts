@@ -88,6 +88,13 @@ export async function register(email: string, password: string) {
   return result;
 }
 
+export async function completeProfile(name: string, displayName?: string) {
+  return api<{ id: string; name: string; displayName?: string | null; profileSetupCompletedAt?: string | null }>("/api/auth/me/complete-profile", {
+    method: "POST",
+    body: JSON.stringify({ name, displayName: displayName || name }),
+  });
+}
+
 export async function forgotPassword(email: string) {
   return raw<{ ok: boolean; message: string }>("/api/auth/forgot-password", {
     method: "POST",
