@@ -2,10 +2,11 @@ export type WikiBlock =
   | { kind: "heading"; level: number; text: string }
   | { kind: "paragraph"; text: string }
   | { kind: "bullet"; text: string }
+  | { kind: "ordered"; index: number; text: string }
   | { kind: "image"; alt: string; url: string }
   | { kind: "code"; text: string };
 
-/** Small, dependency-free subset of the Web Wiki markdown surface for mobile. */
+/** Dependency-free Markdown subset for the mobile Wiki surface. */
 export function parseWikiBlocks(source: string): WikiBlock[] {
   const lines = source.replace(/\r\n?/g, "\n").split("\n");
   const blocks: WikiBlock[] = [];
@@ -31,6 +32,8 @@ export function parseWikiBlocks(source: string): WikiBlock[] {
     if (heading) { flushParagraph(); blocks.push({ kind: "heading", level: heading[1].length, text: heading[2] }); continue; }
     const bullet = trimmed.match(/^[-*+]\s+(.+)$/);
     if (bullet) { flushParagraph(); blocks.push({ kind: "bullet", text: bullet[1] }); continue; }
+    const ordered = trimmed.match(/^(\d+)[.)]\s+(.+)$/);
+    if (ordered) { flushParagraph(); blocks.push({ kind: "ordered", index: Number(ordered[1]), text: ordered[2] }); continue; }
     paragraph.push(trimmed);
   }
   if (code) blocks.push({ kind: "code", text: code.join("\n") });
@@ -38,14 +41,17 @@ export function parseWikiBlocks(source: string): WikiBlock[] {
   return blocks;
 }
 
-export function splitWikiInline(text: string): Array<{ text?: string; url?: string }> {
-  const parts: Array<{ text?: string; url?: string }> = [];
-  const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+export type WikiInlinePart = { text: string; url?: string; strong?: boolean };
+
+export function splitWikiInline(text: string): WikiInlinePart[] {
+  const parts: WikiInlinePart[] = [];
+  const pattern = /\[([^\]]+)\]\(((?:https?:\/\/|\/)[^\s)]+)\)|\*\*([^*]+)\*\*|__([^_]+)__/g;
   let cursor = 0;
   for (const match of text.matchAll(pattern)) {
     const index = match.index ?? 0;
     if (index > cursor) parts.push({ text: text.slice(cursor, index) });
-    parts.push({ text: match[1], url: match[2] });
+    if (match[1] !== undefined) parts.push({ text: match[1], url: match[2] });
+    else parts.push({ text: match[3] ?? match[4] ?? "", strong: true });
     cursor = index + match[0].length;
   }
   if (cursor < text.length) parts.push({ text: text.slice(cursor) });
