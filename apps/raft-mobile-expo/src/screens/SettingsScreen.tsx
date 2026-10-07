@@ -202,7 +202,7 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
   return <KeyboardAvoidingView style={styles.keyboardRoot} behavior={Platform.OS === "ios" ? "padding" : "height"}>
   <ScrollView ref={scrollRef} style={styles.root} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" automaticallyAdjustKeyboardInsets={false} onScroll={(event) => { scrollOffsetRef.current = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={16}>
     <View style={styles.titleRow}><Text style={styles.title}>设置</Text><Pressable accessibilityRole="button" accessibilityLabel="返回消息" onPress={() => { invalidatePasswordReveal(); onBack(); }}><Text style={styles.link}>返回</Text></Pressable></View>
-    {error ? <View accessibilityRole="alert" style={styles.error}><Text style={styles.errorText}>{error}</Text></View> : null}
+    {error ? <View accessibilityRole="alert" accessibilityLabel="设置错误" style={styles.error}><Text style={styles.errorText}>{error}</Text></View> : null}
     {message ? <View style={styles.message}><Text style={styles.messageText}>{message}</Text></View> : null}
 
     <View style={styles.card} accessibilityLabel="账号设置">
