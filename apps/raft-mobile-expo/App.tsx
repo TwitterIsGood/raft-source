@@ -109,6 +109,8 @@ export default function App() {
   // password even though the field visibly contains the new value.
   const emailInputRef = useRef("");
   const passwordInputRef = useRef("");
+  const emailFieldRef = useRef<TextInput | null>(null);
+  const passwordFieldRef = useRef<TextInput | null>(null);
 
   const draft = active ? drafts[active.id] || "" : "";
   const attachmentIds = uploadedAttachments.map((attachment) => attachment.id);
@@ -424,6 +426,13 @@ export default function App() {
     } catch (e) { if (canApplyAuthResult(authRequestRef.current, requestId, authMode, requestMode)) report(e); }
     finally { if (canApplyAuthResult(authRequestRef.current, requestId, authMode, requestMode)) setAuthBusy(false); }
   };
+  const submitAuth = () => {
+    // Blurring first forces iOS to deliver the native field's final text to
+    // onEndEditing before the request snapshot is taken.
+    emailFieldRef.current?.blur();
+    passwordFieldRef.current?.blur();
+    setTimeout(() => { void submitLogin(); }, 200);
+  };
   const submitProfileSetup = async () => {
     const name = profileName.trim();
     if (name.length < 5) { setError("用户名至少需要 5 个字符。"); return; }
@@ -625,10 +634,10 @@ export default function App() {
             {forgotSent ? <Text style={styles.authDescription}>如果 <Text style={styles.authStrong}>{email}</Text> 已注册，我们已发送密码重置链接。</Text> : null}
             {error ? <View style={styles.authBanner}><Text style={styles.authBannerText}>{error}</Text></View> : null}
             {!forgotSent ? <>
-              <View style={styles.authField}><Text style={styles.authLabel}>邮箱</Text><TextInput value={email} onChangeText={(value) => { emailInputRef.current = value; setEmail(value); }} onEndEditing={(event) => { emailInputRef.current = event.nativeEvent.text; }} autoCapitalize="none" keyboardType="email-address" textContentType="username" autoComplete="email" style={styles.authInput} /></View>
-              {authMode !== "forgot" ? <View style={styles.authField}><Text style={styles.authLabel}>密码</Text><TextInput value={password} onChangeText={(value) => { passwordInputRef.current = value; setPassword(value); }} onEndEditing={(event) => { passwordInputRef.current = event.nativeEvent.text; }} placeholder={authMode === "register" ? "至少 8 个字符" : undefined} secureTextEntry textContentType={authMode === "register" ? "newPassword" : "password"} autoComplete={authMode === "register" ? "password-new" : "password"} style={styles.authInput} /></View> : null}
+              <View style={styles.authField}><Text style={styles.authLabel}>邮箱</Text><TextInput ref={emailFieldRef} value={email} onChangeText={(value) => { emailInputRef.current = value; setEmail(value); }} onEndEditing={(event) => { emailInputRef.current = event.nativeEvent.text; }} autoCapitalize="none" keyboardType="email-address" textContentType="username" autoComplete="email" style={styles.authInput} /></View>
+              {authMode !== "forgot" ? <View style={styles.authField}><Text style={styles.authLabel}>密码</Text><TextInput ref={passwordFieldRef} value={password} onChangeText={(value) => { passwordInputRef.current = value; setPassword(value); }} onEndEditing={(event) => { passwordInputRef.current = event.nativeEvent.text; }} placeholder={authMode === "register" ? "至少 8 个字符" : undefined} secureTextEntry textContentType={authMode === "register" ? "newPassword" : "password"} autoComplete={authMode === "register" ? "password-new" : "password"} style={styles.authInput} /></View> : null}
               {authMode === "register" ? <Pressable style={styles.legalRow} onPress={() => setAcceptedLegal((value) => !value)}><View style={[styles.checkbox, acceptedLegal && styles.checkboxChecked]}>{acceptedLegal ? <Text style={styles.checkmark}>✓</Text> : null}</View><Text style={styles.legalText}>我同意 <Text style={styles.authLinkInline} onPress={() => void Linking.openURL("https://raft.build/terms")}>服务条款</Text> 并确认 <Text style={styles.authLinkInline} onPress={() => void Linking.openURL("https://raft.build/privacy")}>隐私政策</Text>。</Text></Pressable> : null}
-              <Pressable style={[styles.authPrimary, (authBusy || (authMode === "register" && !acceptedLegal)) && styles.authDisabled]} disabled={authBusy || (authMode === "register" && !acceptedLegal)} onPress={() => void submitLogin()}><Text style={styles.authPrimaryText}>{authBusy ? authMode === "forgot" ? "发送中…" : authMode === "register" ? "创建账号中…" : "登录中…" : authMode === "forgot" ? "发送重置链接" : authMode === "register" ? "继续" : "登录"}</Text></Pressable>
+              <Pressable style={[styles.authPrimary, (authBusy || (authMode === "register" && !acceptedLegal)) && styles.authDisabled]} disabled={authBusy || (authMode === "register" && !acceptedLegal)} onPress={submitAuth}><Text style={styles.authPrimaryText}>{authBusy ? authMode === "forgot" ? "发送中…" : authMode === "register" ? "创建账号中…" : "登录中…" : authMode === "forgot" ? "发送重置链接" : authMode === "register" ? "继续" : "登录"}</Text></Pressable>
             </> : null}
             {authMode === "login" ? <><Text style={styles.legalAgreement}>继续即表示你同意 <Text style={styles.authLinkInline} onPress={() => void Linking.openURL("https://raft.build/terms")}>服务条款</Text> 和 <Text style={styles.authLinkInline} onPress={() => void Linking.openURL("https://raft.build/privacy")}>隐私政策</Text>。</Text><Pressable onPress={() => switchAuth("forgot")}><Text style={styles.authLink}>忘记密码？</Text></Pressable><Text style={styles.authPrompt}>还没有账号？<Text style={styles.authLinkInline} onPress={() => switchAuth("register")}>创建一个</Text></Text></> : null}
             {authMode === "register" ? <Text style={styles.authPrompt}>已有账号？<Text style={styles.authLinkInline} onPress={() => switchAuth("login")}>登录</Text></Text> : null}
