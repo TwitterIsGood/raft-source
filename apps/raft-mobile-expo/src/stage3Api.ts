@@ -9,6 +9,9 @@ export type MobileTask = {
   status: MobileTaskStatus;
   channelId: string;
   channelName?: string | null;
+  createdById?: string | null;
+  createdByType?: "user" | "agent" | null;
+  createdByName?: string | null;
   claimedByName?: string | null;
   claimedById?: string | null;
   updatedAt: string;
