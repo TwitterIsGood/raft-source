@@ -74,6 +74,16 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
     });
   }, []);
 
+  const invalidatePasswordReveal = useCallback(() => {
+    focusGenerationRef.current += 1;
+    activePasswordFieldRef.current = null;
+    keyboardTopRef.current = null;
+    if (pendingRevealRef.current != null) {
+      cancelAnimationFrame(pendingRevealRef.current);
+      pendingRevealRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     const updateKeyboardTop = (event: { endCoordinates?: { screenY?: number } }) => {
       const screenY = event.endCoordinates?.screenY;
@@ -81,7 +91,7 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
       const field = activePasswordFieldRef.current;
       if (field && keyboardTopRef.current != null) revealPasswordField(field, keyboardTopRef.current);
     };
-    const clearKeyboardTop = () => { keyboardTopRef.current = null; };
+    const clearKeyboardTop = () => { invalidatePasswordReveal(); };
     const subscriptions = [
       Keyboard.addListener("keyboardWillChangeFrame", updateKeyboardTop),
       Keyboard.addListener("keyboardDidShow", updateKeyboardTop),
@@ -91,7 +101,7 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
       subscriptions.forEach((subscription) => subscription.remove());
       if (pendingRevealRef.current != null) cancelAnimationFrame(pendingRevealRef.current);
     };
-  }, [revealPasswordField]);
+  }, [invalidatePasswordReveal, revealPasswordField]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -191,8 +201,8 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
 
   return <KeyboardAvoidingView style={styles.keyboardRoot} behavior={Platform.OS === "ios" ? "padding" : "height"}>
   <ScrollView ref={scrollRef} style={styles.root} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" automaticallyAdjustKeyboardInsets={false} onScroll={(event) => { scrollOffsetRef.current = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={16}>
-    <View style={styles.titleRow}><Text style={styles.title}>设置</Text><Pressable accessibilityRole="button" accessibilityLabel="返回消息" onPress={onBack}><Text style={styles.link}>返回</Text></Pressable></View>
-    {error ? <View style={styles.error}><Text style={styles.errorText}>{error}</Text></View> : null}
+    <View style={styles.titleRow}><Text style={styles.title}>设置</Text><Pressable accessibilityRole="button" accessibilityLabel="返回消息" onPress={() => { invalidatePasswordReveal(); onBack(); }}><Text style={styles.link}>返回</Text></Pressable></View>
+    {error ? <View accessibilityRole="alert" style={styles.error}><Text style={styles.errorText}>{error}</Text></View> : null}
     {message ? <View style={styles.message}><Text style={styles.messageText}>{message}</Text></View> : null}
 
     <View style={styles.card} accessibilityLabel="账号设置">
@@ -202,12 +212,12 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
       <Text style={styles.label}>用户名</Text>
       <Text style={styles.value}>@{user?.name || "—"}</Text>
       <Text style={styles.label}>显示名称</Text>
-      <TextInput accessibilityLabel="显示名称" value={displayName} onChangeText={setDisplayName} style={styles.input} maxLength={120} />
+      <TextInput accessibilityLabel="显示名称" value={displayName} onChangeText={setDisplayName} onFocus={invalidatePasswordReveal} style={styles.input} maxLength={120} />
       <Pressable accessibilityRole="button" accessibilityLabel="保存账号资料" disabled={busy || !displayName.trim() || displayName.trim() === savedDisplayName} onPress={() => void saveProfile()} style={[styles.primary, (busy || !displayName.trim() || displayName.trim() === savedDisplayName) && styles.disabled]}><Text style={styles.primaryText}>保存资料</Text></Pressable>
       <Text style={styles.label}>修改密码</Text>
-      <TextInput ref={passwordRefs.current} accessibilityLabel="当前密码" value={currentPassword} onChangeText={setCurrentPassword} onFocus={() => { activePasswordFieldRef.current = "current"; revealPasswordField("current"); }} placeholder="当前密码" secureTextEntry style={styles.input} />
-      <TextInput ref={passwordRefs.new} accessibilityLabel="新密码" value={newPassword} onChangeText={setNewPassword} onFocus={() => { activePasswordFieldRef.current = "new"; revealPasswordField("new"); }} placeholder="新密码（至少 8 个字符）" secureTextEntry style={styles.input} />
-      <TextInput ref={passwordRefs.confirm} accessibilityLabel="确认新密码" value={confirmPassword} onChangeText={setConfirmPassword} onFocus={() => { activePasswordFieldRef.current = "confirm"; revealPasswordField("confirm"); }} placeholder="再次输入新密码" secureTextEntry style={styles.input} />
+      <TextInput ref={passwordRefs.current} accessibilityLabel="当前密码" value={currentPassword} onChangeText={setCurrentPassword} onFocus={() => { activePasswordFieldRef.current = "current"; revealPasswordField("current"); }} onBlur={() => { if (activePasswordFieldRef.current === "current") invalidatePasswordReveal(); }} placeholder="当前密码" secureTextEntry style={styles.input} />
+      <TextInput ref={passwordRefs.new} accessibilityLabel="新密码" value={newPassword} onChangeText={setNewPassword} onFocus={() => { activePasswordFieldRef.current = "new"; revealPasswordField("new"); }} onBlur={() => { if (activePasswordFieldRef.current === "new") invalidatePasswordReveal(); }} placeholder="新密码（至少 8 个字符）" secureTextEntry style={styles.input} />
+      <TextInput ref={passwordRefs.confirm} accessibilityLabel="确认新密码" value={confirmPassword} onChangeText={setConfirmPassword} onFocus={() => { activePasswordFieldRef.current = "confirm"; revealPasswordField("confirm"); }} onBlur={() => { if (activePasswordFieldRef.current === "confirm") invalidatePasswordReveal(); }} placeholder="再次输入新密码" secureTextEntry style={styles.input} />
       <Pressable ref={savePasswordRef} accessibilityRole="button" accessibilityLabel="保存新密码" disabled={busy || !currentPassword || !newPassword || !confirmPassword} onPress={() => void savePassword()} style={[styles.secondary, (busy || !currentPassword || !newPassword || !confirmPassword) && styles.disabled]}><Text style={styles.secondaryText}>更新密码</Text></Pressable>
     </View>
 
@@ -223,7 +233,7 @@ export function SettingsScreen({ serverId, onBack, onLogout }: Props) {
       </> : <Text style={styles.description}>选择一个工作区后，可在这里调整消息推送范围。</Text>}
     </View>
 
-    <View style={styles.card}><Text style={styles.sectionTitle}>会话</Text><Pressable accessibilityRole="button" accessibilityLabel="退出登录" onPress={onLogout} style={styles.danger}><Text style={styles.dangerText}>退出登录</Text></Pressable></View>
+    <View style={styles.card}><Text style={styles.sectionTitle}>会话</Text><Pressable accessibilityRole="button" accessibilityLabel="退出登录" onPress={() => { invalidatePasswordReveal(); onLogout(); }} style={styles.danger}><Text style={styles.dangerText}>退出登录</Text></Pressable></View>
   </ScrollView>
   </KeyboardAvoidingView>;
 }
