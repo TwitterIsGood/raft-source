@@ -3,7 +3,7 @@ import { ActivityIndicator, FlatList, Image, Keyboard, Linking, Modal, Pressable
 import { getChannels } from "../api";
 import { API_BASE_URL } from "../config";
 import { claimTask, createTask, getServerComputers, getServerMembers, getServerTasks, getWikiDirectory, getWikiPage, getWikiStatus, refreshWiki, setTaskStatus, updateServerComputer, type MobileComputer, type MobileMember, type MobileTask, type WikiArtifact, type WikiPage } from "../stage3Api";
-import { STAGE3_ROUTES, type Stage3Route } from "../stage3Navigation";
+import { filterStage3Members, STAGE3_ROUTES, type Stage3Route } from "../stage3Navigation";
 import { isWikiExternalUrl, parseWikiBlocks, resolveWikiAssetUrl, splitWikiInline, type WikiBlock } from "../wikiRender";
 
 type Props = { serverId: string };
@@ -95,9 +95,11 @@ function WikiInline({ text }: { text: string }) {
 }
 
 function MembersPanel({ serverId }: Props) {
-  const [rows, setRows] = useState<MobileMember[]>([]); const [error, setError] = useState<string | null>(null);
+  const [rows, setRows] = useState<MobileMember[]>([]); const [query, setQuery] = useState(""); const [error, setError] = useState<string | null>(null);
+  const visibleRows = filterStage3Members(rows, query);
   useEffect(() => { let cancelled = false; getServerMembers(serverId).then((items) => { if (!cancelled) setRows(items); }).catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); }); return () => { cancelled = true; }; }, [serverId]);
-  return <View style={styles.panel}><Text style={styles.title}>成员</Text><ErrorText message={error} /><FlatList data={rows} keyExtractor={(item) => item.userId} contentContainerStyle={styles.list} ListEmptyComponent={<Text style={styles.empty}>暂无成员</Text>} renderItem={({ item }) => <View style={styles.card}><Text style={styles.cardTitle}>{item.displayName || item.name}</Text><Text style={styles.meta}>{item.role}</Text>{item.description ? <Text style={styles.bodyText}>{item.description}</Text> : null}</View>} /></View>;
+  const emptyLabel = rows.length > 0 && query.trim() ? `没有匹配的成员：${query.trim()}` : "暂无成员";
+  return <View style={styles.panel}><Text style={styles.title}>成员</Text><TextInput accessibilityLabel="搜索成员" placeholder="搜索成员" value={query} onChangeText={setQuery} style={styles.filterInput} autoCapitalize="none" autoCorrect={false} /><ErrorText message={error} /><FlatList data={visibleRows} keyExtractor={(item) => item.userId} contentContainerStyle={styles.list} ListEmptyComponent={<Text style={styles.empty}>{emptyLabel}</Text>} renderItem={({ item }) => <View style={styles.card}><Text style={styles.cardTitle}>{item.displayName || item.name}</Text><Text style={styles.meta}>{item.role}</Text>{item.description ? <Text style={styles.bodyText}>{item.description}</Text> : null}</View>} /></View>;
 }
 
 function ComputersPanel({ serverId }: Props) {
