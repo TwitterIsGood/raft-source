@@ -64,12 +64,21 @@ function WikiPanel({ serverId }: Props) {
 }
 
 function WikiBlockView({ block }: { block: WikiBlock }) {
-  if (block.kind === "image") return <View style={styles.wikiImageBlock}><Image accessibilityLabel={`Wiki图片 ${block.alt || "图片"}`} source={{ uri: resolveWikiAssetUrl(block.url, API_BASE_URL) }} resizeMode="contain" style={styles.wikiImage} /><Text style={styles.meta}>{block.alt}</Text></View>;
+  if (block.kind === "image") return <WikiImageBlock block={block} />;
   if (block.kind === "heading") return <Text style={[styles.wikiHeading, block.level === 1 ? styles.wikiH1 : block.level === 2 ? styles.wikiH2 : styles.wikiH3]}><WikiInline text={block.text} /></Text>;
   if (block.kind === "bullet") return <View style={styles.wikiBullet}><Text style={styles.wikiBulletMark}>•</Text><Text style={styles.bodyText}><WikiInline text={block.text} /></Text></View>;
   if (block.kind === "ordered") return <View style={styles.wikiBullet}><Text style={styles.wikiBulletMark}>{block.index}.</Text><Text style={styles.bodyText}><WikiInline text={block.text} /></Text></View>;
   if (block.kind === "code") return <ScrollView horizontal style={styles.wikiCode}><Text style={styles.wikiCodeText}>{block.text}</Text></ScrollView>;
   return <Text style={styles.bodyText}><WikiInline text={block.text} /></Text>;
+}
+
+function WikiImageBlock({ block }: { block: Extract<WikiBlock, { kind: "image" }> }) {
+  const [state, setState] = useState<"loading" | "loaded" | "failed">("loading");
+  const uri = resolveWikiAssetUrl(block.url, API_BASE_URL);
+  return <View style={styles.wikiImageBlock}>
+    <Image accessibilityLabel={`Wiki图片 ${block.alt || "图片"}`} source={{ uri }} resizeMode="contain" style={styles.wikiImage} onLoad={() => setState("loaded")} onError={() => setState("failed")} />
+    <Text style={styles.meta}>{state === "loaded" ? `图片已加载：${block.alt}` : state === "failed" ? `图片加载失败：${block.alt}` : `图片加载中：${block.alt}`}</Text>
+  </View>;
 }
 
 function WikiInline({ text }: { text: string }) {
