@@ -15,7 +15,7 @@ export function mergeLiveMessage(current: Message[], incoming: Message): Message
 
 /** The first page remains bounded even when server sync populated the cache first. */
 export function firstMessageWindow(page: Message[], cache: Message[]): Message[] {
-  if (page.length === 0) return [];
+  if (page.length === 0) return cache;
   const oldest = Math.min(...page.map((message) => message.seq ?? Number.MAX_SAFE_INTEGER));
   return mergeMessageWindow(page, cache.filter((message) => (message.seq ?? 0) >= oldest));
 }

@@ -11,8 +11,16 @@ test("server sync cannot expose old cached rows before history pagination", () =
   assert.deepEqual(mergeLiveMessage(page, row(77)).map((message) => message.seq), [80, 79, 78]);
   assert.deepEqual(mergeLiveMessage(page, row(81)).map((message) => message.seq), [81, 80, 79, 78]);
   assert.deepEqual(mergeLiveMessage([], row(81)).map((message) => message.seq), [81]);
-  const liveDuringInitialLoad = mergeLiveMessage([], row(81));
-  assert.deepEqual(firstMessageWindow([row(80), row(79), row(78)], liveDuringInitialLoad).map((message) => message.seq), [81, 80, 79, 78]);
+});
+
+test("an empty confirmed page keeps a first live message", () => {
+  assert.deepEqual(firstMessageWindow([], [row(81)]).map((message) => message.seq), [81]);
+});
+
+test("a live message arriving during the initial page request survives the response", () => {
+  const live = mergeLiveMessage([], row(81));
+  assert.deepEqual(firstMessageWindow([], live).map((message) => message.seq), [81]);
+  assert.deepEqual(firstMessageWindow([row(80), row(79), row(78)], live).map((message) => message.seq), [81, 80, 79, 78]);
 });
 
 test("history page extends the old edge and deduplicates overlap", () => {
