@@ -73,6 +73,27 @@ export function getEditableStage3MemberRoles(input: {
   });
 }
 
+/** Roles available when an owner/admin adds an existing user by id. */
+export function getStage3AddMemberRoles(actorRole: Stage3ServerRole | null | undefined): Array<Exclude<Stage3ServerRole, "guest">> {
+  if (actorRole === "owner") return ["owner", "admin", "member"];
+  if (actorRole === "admin") return ["admin", "member"];
+  return [];
+}
+
+/** Match DELETE /servers/:id/members/:memberId authorization and safeguards. */
+export function canRemoveStage3Member(input: {
+  actorRole: Stage3ServerRole | null | undefined;
+  targetRole: Stage3ServerRole;
+  isSelf: boolean;
+  ownerCount: number;
+}): boolean {
+  const { actorRole, targetRole, isSelf, ownerCount } = input;
+  if (isSelf || !actorRole || actorRole === "member" || actorRole === "guest") return false;
+  if (targetRole === "owner") return actorRole === "owner" && ownerCount > 1;
+  if (actorRole === "owner") return true;
+  return targetRole === "member";
+}
+
 /** Match the Web members page: handle or display name, case-insensitive. */
 export function filterStage3Members<T extends Stage3MemberSearchRow>(rows: readonly T[], query: string): T[] {
   const normalized = query.trim().toLocaleLowerCase();

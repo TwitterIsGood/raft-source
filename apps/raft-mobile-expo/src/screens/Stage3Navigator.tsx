@@ -4,8 +4,8 @@ import { getChannels } from "../api";
 import { getSessionGeneration } from "../session";
 import { getCurrentUser } from "../settingsApi";
 import { API_BASE_URL } from "../config";
-import { claimTask, createTask, getServerComputers, getServerMembers, getServerTasks, getWikiDirectory, getWikiPage, getWikiStatus, refreshWiki, setTaskStatus, updateServerComputer, updateServerMemberRole, type MobileComputer, type MobileMember, type MobileTask, type WikiArtifact, type WikiPage } from "../stage3Api";
-import { createStage3RequestTracker, filterStage3Members, getEditableStage3MemberRoles, isStage3ResponseCurrent, STAGE3_ROUTES, type Stage3Route, type Stage3ServerRole } from "../stage3Navigation";
+import { addServerMember, claimTask, createTask, getServerComputers, getServerMembers, getServerTasks, getWikiDirectory, getWikiPage, getWikiStatus, refreshWiki, removeServerMember, setTaskStatus, updateServerComputer, updateServerMemberRole, type MobileComputer, type MobileMember, type MobileTask, type WikiArtifact, type WikiPage } from "../stage3Api";
+import { canRemoveStage3Member, createStage3RequestTracker, filterStage3Members, getEditableStage3MemberRoles, getStage3AddMemberRoles, isStage3ResponseCurrent, STAGE3_ROUTES, type Stage3Route, type Stage3ServerRole } from "../stage3Navigation";
 import { isWikiExternalUrl, parseWikiBlocks, resolveWikiAssetUrl, splitWikiInline, type WikiBlock } from "../wikiRender";
 
 type Props = { serverId: string };
@@ -98,9 +98,11 @@ function WikiInline({ text }: { text: string }) {
 
 function MembersPanel({ serverId }: Props) {
   const [rows, setRows] = useState<MobileMember[]>([]); const [query, setQuery] = useState(""); const [error, setError] = useState<string | null>(null); const [actorUserId, setActorUserId] = useState<string | null>(null); const [busyUserId, setBusyUserId] = useState<string | null>(null); const [loading, setLoading] = useState(true);
+  const [addOpen, setAddOpen] = useState(false); const [addUserId, setAddUserId] = useState(""); const [addRole, setAddRole] = useState<Exclude<Stage3ServerRole, "guest">>("member"); const [removeTarget, setRemoveTarget] = useState<MobileMember | null>(null);
   const requestTracker = useRef(createStage3RequestTracker()); const mutationGeneration = useRef(0);
   const visibleRows = filterStage3Members(rows, query);
   const load = useCallback(async (expectedMutation?: number) => {
+    if (expectedMutation === undefined) mutationGeneration.current += 1;
     const token = requestTracker.current.beginRequest();
     const sessionGeneration = getSessionGeneration();
     setLoading(true);
@@ -145,13 +147,57 @@ function MembersPanel({ serverId }: Props) {
       // Re-read the authoritative membership row after the mutation.
       await load(operation);
     } catch (e) {
-      if (requestTracker.current.isScopeCurrent(scope) && mutationGeneration.current === operation && getSessionGeneration() === sessionGeneration) setError(e instanceof Error ? e.message : String(e));
+      if (requestTracker.current.isScopeCurrent(scope) && mutationGeneration.current === operation && getSessionGeneration() === sessionGeneration) setError(stage3ErrorMessage(e));
+    } finally {
+      if (requestTracker.current.isScopeCurrent(scope) && mutationGeneration.current === operation && getSessionGeneration() === sessionGeneration) setBusyUserId(null);
+    }
+  };
+  const beginAdd = () => {
+    const allowed = getStage3AddMemberRoles(actorRole);
+    if (!allowed.length) return;
+    setAddUserId(""); setAddRole(allowed.includes("member") ? "member" : allowed[0]); setError(null); setAddOpen(true);
+  };
+  const submitAdd = async () => {
+    const userId = addUserId.trim();
+    const allowed = getStage3AddMemberRoles(actorRole);
+    if (!userId || !allowed.includes(addRole)) return;
+    const scope = requestTracker.current.currentScope(); const operation = ++mutationGeneration.current; const sessionGeneration = getSessionGeneration();
+    setBusyUserId("add"); setError(null);
+    try {
+      await addServerMember(serverId, userId, addRole);
+      if (!requestTracker.current.isScopeCurrent(scope) || getSessionGeneration() !== sessionGeneration || mutationGeneration.current !== operation) return;
+      await load(operation);
+      if (requestTracker.current.isScopeCurrent(scope) && mutationGeneration.current === operation && getSessionGeneration() === sessionGeneration) { setAddOpen(false); setAddUserId(""); }
+    } catch (e) {
+      if (requestTracker.current.isScopeCurrent(scope) && mutationGeneration.current === operation && getSessionGeneration() === sessionGeneration) setError(stage3ErrorMessage(e));
+    } finally {
+      if (requestTracker.current.isScopeCurrent(scope) && mutationGeneration.current === operation && getSessionGeneration() === sessionGeneration) setBusyUserId(null);
+    }
+  };
+  const confirmRemove = async () => {
+    const member = removeTarget;
+    if (!member) return;
+    const scope = requestTracker.current.currentScope(); const operation = ++mutationGeneration.current; const sessionGeneration = getSessionGeneration();
+    setBusyUserId(member.userId); setError(null);
+    try {
+      await removeServerMember(serverId, member.userId);
+      if (!requestTracker.current.isScopeCurrent(scope) || getSessionGeneration() !== sessionGeneration || mutationGeneration.current !== operation) return;
+      await load(operation);
+      if (requestTracker.current.isScopeCurrent(scope) && mutationGeneration.current === operation && getSessionGeneration() === sessionGeneration) setRemoveTarget(null);
+    } catch (e) {
+      if (requestTracker.current.isScopeCurrent(scope) && mutationGeneration.current === operation && getSessionGeneration() === sessionGeneration) setError(stage3ErrorMessage(e));
     } finally {
       if (requestTracker.current.isScopeCurrent(scope) && mutationGeneration.current === operation && getSessionGeneration() === sessionGeneration) setBusyUserId(null);
     }
   };
   const emptyLabel = rows.length > 0 && query.trim() ? `没有匹配的成员：${query.trim()}` : "暂无成员";
-  return <View style={styles.panel}><View style={styles.header}><Text style={styles.title}>成员</Text><Pressable accessibilityRole="button" accessibilityLabel="刷新成员" disabled={loading} onPress={() => void load()}><Text style={[styles.action, loading && styles.disabledText]}>刷新</Text></Pressable></View><TextInput accessibilityLabel="搜索成员" placeholder="搜索成员" value={query} onChangeText={setQuery} style={styles.filterInput} autoCapitalize="none" autoCorrect={false} /><ErrorText message={error} />{loading ? <ActivityIndicator accessibilityLabel="加载成员" /> : null}<FlatList data={visibleRows} keyExtractor={(item) => item.userId} contentContainerStyle={styles.list} ListEmptyComponent={<Text style={styles.empty}>{emptyLabel}</Text>} renderItem={({ item }) => { const roles = membersReady ? getEditableStage3MemberRoles({ actorRole, targetRole: item.role, isSelf: item.userId === actorUserId, ownerCount }) : []; return <View style={styles.card}><Text style={styles.cardTitle}>{item.displayName || item.name}</Text><Text style={styles.meta}>角色：{roleLabel(item.role)}</Text>{item.description ? <Text style={styles.bodyText}>{item.description}</Text> : null}{roles.length ? <View style={styles.cardActions}>{roles.map((role) => { const activate = () => void saveRole(item, role); return <Pressable key={role} accessibilityRole="button" accessibilityLabel={`将 ${item.displayName || item.name} 设为${roleLabel(role)}`} disabled={busyUserId === item.userId} onPress={activate}><Text style={[styles.action, busyUserId === item.userId && styles.disabledText]}>设为{roleLabel(role)}</Text></Pressable>; })}</View> : null}</View>; }} /></View>;
+  const addRoles = membersReady ? getStage3AddMemberRoles(actorRole) : [];
+  return <View style={styles.panel}><View style={styles.header}><Text style={styles.title}>成员</Text><View style={styles.headerActions}>{addRoles.length ? <Pressable accessibilityRole="button" accessibilityLabel="添加成员" disabled={Boolean(busyUserId)} onPress={beginAdd}><Text style={styles.action}>添加</Text></Pressable> : null}<Pressable accessibilityRole="button" accessibilityLabel="刷新成员" disabled={loading || Boolean(busyUserId)} onPress={() => void load()}><Text style={[styles.action, (loading || busyUserId) && styles.disabledText]}>刷新</Text></Pressable></View></View><TextInput accessibilityLabel="搜索成员" placeholder="搜索成员" value={query} onChangeText={setQuery} style={styles.filterInput} autoCapitalize="none" autoCorrect={false} /><ErrorText message={error} />{loading ? <ActivityIndicator accessibilityLabel="加载成员" /> : null}<FlatList data={visibleRows} keyExtractor={(item) => item.userId} contentContainerStyle={styles.list} ListEmptyComponent={<Text style={styles.empty}>{emptyLabel}</Text>} renderItem={({ item }) => { const roles = membersReady ? getEditableStage3MemberRoles({ actorRole, targetRole: item.role, isSelf: item.userId === actorUserId, ownerCount }) : []; const canRemove = membersReady && canRemoveStage3Member({ actorRole, targetRole: item.role, isSelf: item.userId === actorUserId, ownerCount }); return <View style={styles.card}><Text style={styles.cardTitle}>{item.displayName || item.name}</Text><Text style={styles.meta}>角色：{roleLabel(item.role)}</Text>{item.description ? <Text style={styles.bodyText}>{item.description}</Text> : null}{roles.length || canRemove ? <View style={styles.cardActions}>{roles.map((role) => { const activate = () => void saveRole(item, role); return <Pressable key={role} accessibilityRole="button" accessibilityLabel={`将 ${item.displayName || item.name} 设为${roleLabel(role)}`} disabled={busyUserId === item.userId} onPress={activate}><Text style={[styles.action, busyUserId === item.userId && styles.disabledText]}>设为{roleLabel(role)}</Text></Pressable>; })}{canRemove ? <Pressable accessibilityRole="button" accessibilityLabel={`移除成员 ${item.displayName || item.name}`} disabled={Boolean(busyUserId)} onPress={() => setRemoveTarget(item)}><Text style={[styles.action, busyUserId && styles.disabledText]}>移除</Text></Pressable> : null}</View> : null}</View>; }} /><Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => { if (!busyUserId) setAddOpen(false); }}><View style={styles.modalBackdrop}><View style={styles.modalCard}><Text style={styles.modalTitle}>添加成员</Text><Text style={styles.bodyText}>输入隔离测试成员的 user ID。</Text><TextInput autoFocus accessibilityLabel="成员 user ID" placeholder="user ID" value={addUserId} onChangeText={setAddUserId} autoCapitalize="none" autoCorrect={false} style={styles.modalInput} /><Text style={styles.meta}>角色</Text><View style={styles.cardActions}>{addRoles.map((role) => <Pressable key={role} accessibilityRole="button" accessibilityState={{ selected: addRole === role }} onPress={() => setAddRole(role)}><Text style={[styles.action, addRole === role && styles.selected]}>{roleLabel(role)}</Text></Pressable>)}</View><View style={styles.modalActions}><Pressable accessibilityRole="button" disabled={Boolean(busyUserId)} onPress={() => setAddOpen(false)}><Text style={styles.action}>取消</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="确认添加成员" disabled={!addUserId.trim() || Boolean(busyUserId)} onPress={() => void submitAdd()}><Text style={[styles.action, (!addUserId.trim() || busyUserId) && styles.disabledText]}>{busyUserId === "add" ? "添加中…" : "添加"}</Text></Pressable></View></View></View></Modal><Modal visible={Boolean(removeTarget)} transparent animationType="fade" onRequestClose={() => { if (!busyUserId) setRemoveTarget(null); }}><View style={styles.modalBackdrop}><View style={styles.modalCard}><Text style={styles.modalTitle}>移除成员</Text><Text style={styles.bodyText}>确定移除“{removeTarget?.displayName || removeTarget?.name}”？此操作会从服务器成员列表中移除该成员。</Text><View style={styles.modalActions}><Pressable accessibilityRole="button" disabled={Boolean(busyUserId)} onPress={() => setRemoveTarget(null)}><Text style={styles.action}>取消</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="确认移除成员" disabled={Boolean(busyUserId)} onPress={() => void confirmRemove()}><Text style={[styles.action, busyUserId && styles.disabledText]}>{busyUserId ? "移除中…" : "确认移除"}</Text></Pressable></View></View></View></Modal></View>;
+}
+
+function stage3ErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  try { const parsed = JSON.parse(raw) as { error?: unknown }; return typeof parsed.error === "string" ? parsed.error : raw; } catch { return raw; }
 }
 
 function ComputersPanel({ serverId }: Props) {

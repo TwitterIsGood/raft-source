@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createStage3RequestTracker, filterStage3Members, getEditableStage3MemberRoles, isStage3ResponseCurrent, isStage3Route, STAGE3_ROUTES } from "./stage3Navigation.ts";
+import { canRemoveStage3Member, createStage3RequestTracker, filterStage3Members, getEditableStage3MemberRoles, getStage3AddMemberRoles, isStage3ResponseCurrent, isStage3Route, STAGE3_ROUTES } from "./stage3Navigation.ts";
 
 test("stage3 workspace routes cover tasks, wiki, members and computers", () => {
   assert.deepEqual(STAGE3_ROUTES.map((item) => item.route), ["tasks", "wiki", "members", "computers"]);
@@ -27,6 +27,18 @@ test("stage3 member role editor follows Web/API transition rules", () => {
   assert.deepEqual(getEditableStage3MemberRoles({ actorRole: "admin", targetRole: "member", isSelf: false, ownerCount: 1 }), ["admin"]);
   assert.deepEqual(getEditableStage3MemberRoles({ actorRole: "admin", targetRole: "admin", isSelf: false, ownerCount: 1 }), []);
   assert.deepEqual(getEditableStage3MemberRoles({ actorRole: "owner", targetRole: "member", isSelf: true, ownerCount: 2 }), []);
+});
+
+test("stage3 member add/remove rules follow Web/API permissions", () => {
+  assert.deepEqual(getStage3AddMemberRoles("owner"), ["owner", "admin", "member"]);
+  assert.deepEqual(getStage3AddMemberRoles("admin"), ["admin", "member"]);
+  assert.deepEqual(getStage3AddMemberRoles("member"), []);
+  assert.equal(canRemoveStage3Member({ actorRole: "owner", targetRole: "member", isSelf: false, ownerCount: 1 }), true);
+  assert.equal(canRemoveStage3Member({ actorRole: "admin", targetRole: "member", isSelf: false, ownerCount: 1 }), true);
+  assert.equal(canRemoveStage3Member({ actorRole: "admin", targetRole: "admin", isSelf: false, ownerCount: 1 }), false);
+  assert.equal(canRemoveStage3Member({ actorRole: "owner", targetRole: "owner", isSelf: false, ownerCount: 1 }), false);
+  assert.equal(canRemoveStage3Member({ actorRole: "owner", targetRole: "owner", isSelf: false, ownerCount: 2 }), true);
+  assert.equal(canRemoveStage3Member({ actorRole: "owner", targetRole: "member", isSelf: true, ownerCount: 2 }), false);
 });
 
 test("stage3 member request tracker rejects late workspace and request responses", () => {

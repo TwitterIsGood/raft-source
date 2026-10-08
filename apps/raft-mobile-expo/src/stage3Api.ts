@@ -85,6 +85,17 @@ export function updateServerMemberRole(serverId: string, userId: string, role: S
     body: JSON.stringify({ role }),
   }, serverId);
 }
+export function addServerMember(serverId: string, userId: string, role: Exclude<Stage3ServerRole, "guest"> = "member"): Promise<{ ok: boolean; added: boolean }> {
+  return api(`/api/servers/${encodeURIComponent(serverId)}/members`, {
+    method: "POST",
+    body: JSON.stringify({ userId, role }),
+  }, serverId);
+}
+export function removeServerMember(serverId: string, userId: string): Promise<{ ok: boolean }> {
+  return api(`/api/servers/${encodeURIComponent(serverId)}/members/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+  }, serverId);
+}
 export async function getServerComputers(serverId: string): Promise<MobileComputer[]> {
   const response = await api<MobileComputer[] | { machines?: MobileComputer[] }>(`/api/servers/${encodeURIComponent(serverId)}/machines`, {}, serverId);
   return Array.isArray(response) ? response : response.machines ?? [];
