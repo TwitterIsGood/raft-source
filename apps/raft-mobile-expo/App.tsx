@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, AppState, FlatList, Image, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import { StatusBar } from "expo-status-bar";
 import { api, apiMultipart, completeProfile, forgotPassword, getChannel, getChannelMembers, getChannels, getDMs, getMessageContext, getMessages, getOrCreateThread, getServers, login, logoutRemote, register, sendMessage } from "./src/api";
@@ -18,6 +19,7 @@ import { SettingsScreen } from "./src/screens/SettingsScreen";
 import type { ActivityInboxRow, SavedMessage, SearchResult } from "./src/stage2Api";
 import { formatMessageTime, normalizeMessageCreatedAt } from "./src/messageTime";
 import { firstMessageWindow, mergeLiveMessage, mergeMessageWindow } from "./src/messageWindow";
+import { clearMessageAttention, createMessageAttentionState, messageAttentionCount, noteNewMessage, setMessageLatestState } from "./src/messageAttention";
 
 const color = { ink: "#17212F", muted: "#718096", line: "#E5EAF0", bg: "#F6F8FB", blue: "#365FE8", mine: "#E8EEFF", white: "#FFFFFF" };
 const displayName = (channel: Channel) => channel.type === "dm" ? channel.peerDisplayName || channel.peerName || channel.name || "私信" : channel.name || "未命名频道";
@@ -67,6 +69,7 @@ export default function App() {
   const [threadParent, setThreadParent] = useState<Message | null>(null);
   const [threadOrigin, setThreadOrigin] = useState<Channel | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessageCount, setNewMessageCount] = useState(0);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [hasOlder, setHasOlder] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -97,6 +100,10 @@ export default function App() {
   const socketRef = useRef<ReturnType<typeof createRaftSocket> | null>(null);
   const activeRequestRef = useRef(0);
   const loadingOlder = useRef(false);
+  const messagesRef = useRef<Message[]>([]);
+  const messagesReadyRef = useRef(false);
+  const messageAttentionRef = useRef(createMessageAttentionState());
+  const followLatestOnContentChangeRef = useRef(false);
   const navigationRef = useRef<{ serverId: string; channelId: string; messageId?: string } | null>(null);
   const focusMessageRef = useRef<string | null>(null);
   const sessionEpochRef = useRef(getSessionGeneration());
@@ -154,10 +161,35 @@ export default function App() {
   };
   const scopeIsCurrent = (serverId: string, channelId: string, epoch: number) => sessionEpochRef.current === epoch && isCurrentScope({ serverId, channelId }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null);
   const composerScopeIsCurrent = (serverId: string, channelId: string, epoch: number, operation: number) => composerOperationRef.current === operation && scopeIsCurrent(serverId, channelId, epoch);
-  const open = (item: Channel, parent: Message | null = null, focusMessageId?: string) => { composerOperationRef.current += 1; focusMessageRef.current = focusMessageId ?? null; setHighlightedMessageId(null); setActive(item); activeRef.current = item; setThreadParent(parent); if (!parent) setThreadOrigin(null); setMode("chat"); setError(null); setUploading(false); setSending(false); clearComposerAttachments(); clearAttachmentUrls(); setSelectedMentions([]); setMentionTrigger(null); setMentionQuery(""); setCursorPosition(0); };
+  const updateMessageAttention = (next: ReturnType<typeof createMessageAttentionState>) => {
+    if (next === messageAttentionRef.current) return;
+    messageAttentionRef.current = next;
+    setNewMessageCount(messageAttentionCount(next));
+  };
+  const resetMessageAttention = () => {
+    followLatestOnContentChangeRef.current = false;
+    updateMessageAttention(clearMessageAttention());
+  };
+  const scrollToLatest = () => {
+    updateMessageAttention(setMessageLatestState(messageAttentionRef.current, true));
+    list.current?.scrollToOffset({ offset: 0, animated: true });
+  };
+  const handleMessageScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    // FlatList is inverted: offset 0 is the newest edge, while a larger
+    // offset means the reader is browsing older history.
+    const isAtLatest = event.nativeEvent.contentOffset.y <= 24;
+    if (!isAtLatest) followLatestOnContentChangeRef.current = false;
+    updateMessageAttention(setMessageLatestState(messageAttentionRef.current, isAtLatest));
+  };
+  const handleMessageContentSizeChange = () => {
+    if (!followLatestOnContentChangeRef.current) return;
+    followLatestOnContentChangeRef.current = false;
+    list.current?.scrollToOffset({ offset: 0, animated: false });
+  };
+  const open = (item: Channel, parent: Message | null = null, focusMessageId?: string) => { composerOperationRef.current += 1; focusMessageRef.current = focusMessageId ?? null; resetMessageAttention(); messagesReadyRef.current = false; messagesRef.current = []; setMessages([]); setHighlightedMessageId(null); setActive(item); activeRef.current = item; setThreadParent(parent); if (!parent) setThreadOrigin(null); setMode("chat"); setError(null); setUploading(false); setSending(false); clearComposerAttachments(); clearAttachmentUrls(); setSelectedMentions([]); setMentionTrigger(null); setMentionQuery(""); setCursorPosition(0); };
   const back = () => {
     if (mode === "chat" && threadParent && threadOrigin) { open(threadOrigin); return; }
-    if (mode === "chat") { composerOperationRef.current += 1; setMode("conversations"); setActive(null); activeRef.current = null; setThreadParent(null); setUploading(false); setSending(false); clearComposerAttachments(); clearAttachmentUrls(); setSelectedMentions([]); setMentionTrigger(null); setMentionQuery(""); return; }
+    if (mode === "chat") { composerOperationRef.current += 1; resetMessageAttention(); messagesReadyRef.current = false; messagesRef.current = []; setMessages([]); setMode("conversations"); setActive(null); activeRef.current = null; setThreadParent(null); setUploading(false); setSending(false); clearComposerAttachments(); clearAttachmentUrls(); setSelectedMentions([]); setMentionTrigger(null); setMentionQuery(""); return; }
     if (mode === "stage2") { setMode("conversations"); return; }
     if (mode === "settings") { setMode("conversations"); return; }
     setMode("servers");
@@ -209,6 +241,9 @@ export default function App() {
     clearComposerAttachments();
     setSelectedMentions([]);
     setMentionCandidates([]);
+    resetMessageAttention();
+    messagesReadyRef.current = false;
+    messagesRef.current = [];
     activeRef.current = null;
     activeRequestRef.current += 1;
     setMode("conversations");
@@ -235,7 +270,22 @@ export default function App() {
     const cacheMessage = (row: Message) => {
       if (closed || sessionEpochRef.current !== epoch) return;
       messageCacheRef.current.merge(server.id, [row]);
-      if (isCurrentScope({ serverId: server.id, channelId: row.channelId }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null)) setMessages((current) => mergeLiveMessage(current, row));
+      if (!isCurrentScope({ serverId: server.id, channelId: row.channelId }, serverRef.current && activeRef.current ? { serverId: serverRef.current.id, channelId: activeRef.current.id } : null)) return;
+      const current = messagesRef.current;
+      const next = mergeLiveMessage(current, row);
+      const newestSeq = current[0]?.seq ?? Number.NEGATIVE_INFINITY;
+      const isNewNewest = !current.some((message) => message.id === row.id) && (row.seq ?? Number.NEGATIVE_INFINITY) > newestSeq;
+      if (next !== current) {
+        messagesRef.current = next;
+        setMessages(next);
+      }
+      if (!messagesReadyRef.current || !isNewNewest) return;
+      if (messageAttentionRef.current.isAtLatest) {
+        // The reader was already at the newest edge, so follow the new row.
+        followLatestOnContentChangeRef.current = true;
+      } else {
+        updateMessageAttention(noteNewMessage(messageAttentionRef.current, row.id, true));
+      }
     };
     const syncServer = async (): Promise<boolean> => {
       if (syncingServerRef.current.has(server.id)) return false;
@@ -295,6 +345,8 @@ export default function App() {
     const requestId = ++activeRequestRef.current;
     const serverId = server.id;
     const channelId = active.id;
+    messagesReadyRef.current = false;
+    messagesRef.current = [];
     setMessages([]); setHasOlder(false); setLoading(true);
     const focusMessageId = focusMessageRef.current;
     focusMessageRef.current = null;
@@ -315,6 +367,7 @@ export default function App() {
         const focusedRows = [...rows].sort((a, b) => (b.seq ?? 0) - (a.seq ?? 0));
         const targetPresent = focusedRows.some((message) => message.id === targetMessageId);
         if (!targetPresent) {
+          messagesRef.current = [];
           setMessages([]);
           setHighlightedMessageId(null);
           setHasOlder(false);
@@ -323,11 +376,16 @@ export default function App() {
           return;
         }
         messageCacheRef.current.merge(serverId, focusedRows);
+        messagesRef.current = focusedRows;
         setMessages(focusedRows);
       } else {
         messageCacheRef.current.merge(serverId, rows);
-        setMessages(firstMessageWindow(rows, messageCacheRef.current.get(serverId, channelId)));
+        const firstWindow = firstMessageWindow(rows, messageCacheRef.current.get(serverId, channelId));
+        messagesRef.current = firstWindow;
+        setMessages(firstWindow);
       }
+      messagesReadyRef.current = true;
+      updateMessageAttention(setMessageLatestState(messageAttentionRef.current, Boolean(!focusMessageId)));
       setHighlightedMessageId(targetMessageId);
       setHasOlder("hasOlder" in result ? Boolean(result.hasOlder) : rows.length >= 50 && !result.historyLimited);
       setLoading(false);
@@ -397,7 +455,9 @@ export default function App() {
       if (!scopeIsCurrent(serverId, channelId, epoch) || requestId !== activeRequestRef.current) return;
       messageCacheRef.current.merge(serverId, rows);
       if (scopeIsCurrent(serverId, channelId, epoch)) {
-        setMessages((current) => mergeMessageWindow(current, rows));
+        const next = mergeMessageWindow(messagesRef.current, rows);
+        messagesRef.current = next;
+        setMessages(next);
         setHasOlder(rows.length >= 50 && !result.historyLimited);
       }
     } catch (e) { if (epoch === sessionEpochRef.current) report(e); } finally { loadingOlder.current = false; }
@@ -472,6 +532,9 @@ export default function App() {
     channelsRef.current = [];
     setServers([]);
     setChannels([]);
+    resetMessageAttention();
+    messagesReadyRef.current = false;
+    messagesRef.current = [];
     setMessages([]);
     setHighlightedMessageId(null);
     pendingServerSeqRef.current.clear();
@@ -592,6 +655,7 @@ export default function App() {
       messageCacheRef.current.merge(serverId, [row]);
       const next = messageCacheRef.current.get(serverId, channelId);
       if (composerScopeIsCurrent(serverId, channelId, epoch, operation)) {
+        messagesRef.current = next;
         setMessages(next);
         const current = composerSnapshotRef.current;
         const now: ComposerSnapshot = { draft: current.channelId === channelId ? current.draft : "", attachmentIds: current.channelId === channelId ? current.attachmentIds : [] };
@@ -671,7 +735,7 @@ export default function App() {
     {mode === "conversations" ? <FlatList data={channels} keyExtractor={(item) => item.id} contentContainerStyle={styles.listPad} renderItem={({ item }) => <Pressable style={styles.conversationRow} onPress={() => open(item)}><Text style={styles.rowTitle}>{item.type === "dm" ? "@" : "#"} {displayName(item)}</Text><Text style={styles.muted}>{item.type === "dm" ? "私信" : "频道"}</Text></Pressable>} ListEmptyComponent={<View style={styles.center}><Text style={styles.muted}>暂无已加入的频道或私信</Text></View>} /> : null}
     {mode === "stage2" && server ? <Stage2Navigator serverId={server.id} onOpenSearchResult={openStage2SearchResult} onOpenActivityRow={openStage2ActivityRow} onOpenSavedMessage={openStage2SavedMessage} /> : null}
     {mode === "settings" ? <SettingsScreen serverId={server?.id ?? null} onBack={back} onLogout={() => void logout()} /> : null}
-    {mode === "chat" ? <KeyboardAvoidingView style={styles.chat} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={0}>{threadParent ? <View style={styles.threadParent}><Text style={styles.muted}>回复 {threadParent.senderName}</Text><Text numberOfLines={2}>{threadParent.content}</Text></View> : null}{focusedMessage ? <View style={styles.focusedMessageCard} accessibilityLabel={`已定位消息 ${focusedMessage.content}`}><Text style={styles.focusedMessageLabel}>已定位消息</Text><Text style={styles.sender}>{focusedMessage.senderName}</Text><Text style={styles.content}>{focusedMessage.content}</Text></View> : null}<FlatList ref={list} inverted data={messages} keyExtractor={(item) => item.id} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.messages} renderItem={({ item }) => <Pressable accessible={false} style={[styles.message, highlightedMessageId === item.id && styles.highlightedMessage]} onPress={() => void openThread(item)}><View style={styles.messageHeader}><Text style={styles.sender}>{item.senderName}</Text><Text style={styles.time}>{formatMessageTime(item.createdAt)}</Text></View><Text style={styles.content}>{item.content}</Text>{item.attachments?.map((attachment) => <Pressable key={attachment.id} style={styles.attachmentRow} accessibilityLabel={`打开附件 ${attachment.filename} · 消息 ${item.content}`} onPress={() => void openAttachment(attachment)}><Text style={styles.attachmentLabel}>📎 {attachment.filename}</Text><Text style={styles.muted}>{attachment.mimeType || "附件"} · 点按打开</Text></Pressable>)}{item.mentions?.length ? <Text style={styles.mentionSummary}>提及：{item.mentions.map((mention) => `@${mention.name}`).join(" ")}</Text> : null}</Pressable>} onEndReached={() => void loadOlder()} onEndReachedThreshold={0.3} ListFooterComponent={loading ? <ActivityIndicator color={color.blue} /> : null} initialNumToRender={20} maxToRenderPerBatch={15} windowSize={7} removeClippedSubviews={Platform.OS !== "ios"} maintainVisibleContentPosition={{ minIndexForVisible: 0 }} /><View style={styles.composer}><View style={styles.composerTools}><Pressable style={styles.toolButton} accessibilityLabel="添加附件" disabled={uploading || sending} onPress={() => void chooseAttachments()}><Text style={styles.toolLabel}>{uploading ? "上传中…" : "附件"}</Text></Pressable>{pickedAttachments.length ? <Text numberOfLines={1} style={styles.attachmentPending}>已选 {pickedAttachments.map((asset) => asset.name).join("、")}</Text> : null}</View><TextInput value={draft} onChangeText={handleDraftChange} onSelectionChange={(event) => { const cursor = event.nativeEvent.selection.end; const currentDraft = active ? draftsRef.current[active.id] ?? draft : draft; updateMentionTrigger(currentDraft, cursor); }} placeholder="写消息…" multiline maxLength={32000} style={styles.composerInput} textAlignVertical="top" /><Pressable style={[styles.send, (!draft.trim() || sending || uploading) && styles.disabled]} disabled={!draft.trim() || sending || uploading} accessibilityLabel="发送消息" onPress={() => void submitMessage()}><Text style={styles.sendLabel}>发送</Text></Pressable>{mentionTrigger && mentionResults.length ? <View style={styles.mentionMenu}>{mentionResults.map((candidate) => <Pressable key={`${candidate.type}:${candidate.id}`} style={styles.mentionRow} onPress={() => chooseMention(candidate)}><Text style={styles.mentionName}>@{candidate.name}</Text><Text style={styles.muted}>{candidate.type === "agent" ? "Agent" : "成员"}</Text></Pressable>)} </View> : null}</View></KeyboardAvoidingView> : null}
+    {mode === "chat" ? <KeyboardAvoidingView style={styles.chat} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={0}>{threadParent ? <View style={styles.threadParent}><Text style={styles.muted}>回复 {threadParent.senderName}</Text><Text numberOfLines={2}>{threadParent.content}</Text></View> : null}{focusedMessage ? <View style={styles.focusedMessageCard} accessibilityLabel={`已定位消息 ${focusedMessage.content}`}><Text style={styles.focusedMessageLabel}>已定位消息</Text><Text style={styles.sender}>{focusedMessage.senderName}</Text><Text style={styles.content}>{focusedMessage.content}</Text></View> : null}<FlatList ref={list} inverted data={messages} keyExtractor={(item) => item.id} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.messages} renderItem={({ item }) => <Pressable accessible={false} style={[styles.message, highlightedMessageId === item.id && styles.highlightedMessage]} onPress={() => void openThread(item)}><View style={styles.messageHeader}><Text style={styles.sender}>{item.senderName}</Text><Text style={styles.time}>{formatMessageTime(item.createdAt)}</Text></View><Text style={styles.content}>{item.content}</Text>{item.attachments?.map((attachment) => <Pressable key={attachment.id} style={styles.attachmentRow} accessibilityLabel={`打开附件 ${attachment.filename} · 消息 ${item.content}`} onPress={() => void openAttachment(attachment)}><Text style={styles.attachmentLabel}>📎 {attachment.filename}</Text><Text style={styles.muted}>{attachment.mimeType || "附件"} · 点按打开</Text></Pressable>)}{item.mentions?.length ? <Text style={styles.mentionSummary}>提及：{item.mentions.map((mention) => `@${mention.name}`).join(" ")}</Text> : null}</Pressable>} onScroll={handleMessageScroll} onContentSizeChange={handleMessageContentSizeChange} scrollEventThrottle={100} onEndReached={() => void loadOlder()} onEndReachedThreshold={0.3} ListFooterComponent={loading ? <ActivityIndicator color={color.blue} /> : null} initialNumToRender={20} maxToRenderPerBatch={15} windowSize={7} removeClippedSubviews={Platform.OS !== "ios"} maintainVisibleContentPosition={{ minIndexForVisible: 0 }} />{newMessageCount > 0 ? <View style={styles.newMessageBar}><Pressable style={styles.newMessageButton} accessibilityRole="button" accessibilityLabel={`回到底部，${newMessageCount} 条新消息`} onPress={scrollToLatest}><Text style={styles.newMessageText}>{newMessageCount} 条新消息 · 回到底部</Text></Pressable></View> : null}<View style={styles.composer}><View style={styles.composerTools}><Pressable style={styles.toolButton} accessibilityLabel="添加附件" disabled={uploading || sending} onPress={() => void chooseAttachments()}><Text style={styles.toolLabel}>{uploading ? "上传中…" : "附件"}</Text></Pressable>{pickedAttachments.length ? <Text numberOfLines={1} style={styles.attachmentPending}>已选 {pickedAttachments.map((asset) => asset.name).join("、")}</Text> : null}</View><TextInput value={draft} onChangeText={handleDraftChange} onSelectionChange={(event) => { const cursor = event.nativeEvent.selection.end; const currentDraft = active ? draftsRef.current[active.id] ?? draft : draft; updateMentionTrigger(currentDraft, cursor); }} placeholder="写消息…" multiline maxLength={32000} style={styles.composerInput} textAlignVertical="top" /><Pressable style={[styles.send, (!draft.trim() || sending || uploading) && styles.disabled]} disabled={!draft.trim() || sending || uploading} accessibilityLabel="发送消息" onPress={() => void submitMessage()}><Text style={styles.sendLabel}>发送</Text></Pressable>{mentionTrigger && mentionResults.length ? <View style={styles.mentionMenu}>{mentionResults.map((candidate) => <Pressable key={`${candidate.type}:${candidate.id}`} style={styles.mentionRow} onPress={() => chooseMention(candidate)}><Text style={styles.mentionName}>@{candidate.name}</Text><Text style={styles.muted}>{candidate.type === "agent" ? "Agent" : "成员"}</Text></Pressable>)} </View> : null}</View></KeyboardAvoidingView> : null}
     {notice ? <Pressable style={styles.notice} onPress={() => setNotice("")}><Text numberOfLines={2} style={styles.noticeText}>{notice}</Text></Pressable> : null}
     <Modal visible={Boolean(previewAttachment)} transparent animationType="fade" onRequestClose={() => { setPreviewAttachment(null); setPreviewText(null); }}><View style={styles.previewBackdrop}><Pressable style={styles.previewClose} accessibilityLabel="关闭附件预览" onPress={() => { setPreviewAttachment(null); setPreviewText(null); }}><Text style={styles.previewCloseLabel}>关闭</Text></Pressable>{previewAttachment && previewAttachment.mimeType?.startsWith("image/") && attachmentUrls[previewAttachment.id] ? <Image testID="attachment-preview-image" accessibilityLabel={`附件预览 ${previewAttachment.filename}`} source={{ uri: attachmentUrls[previewAttachment.id] }} resizeMode="contain" style={styles.previewImage} /> : null}{previewText !== null ? <ScrollView style={styles.previewDocument} contentContainerStyle={styles.previewDocumentContent}><Text>{previewText}</Text></ScrollView> : null}<Text style={styles.previewCaption}>{previewAttachment?.filename}</Text></View></Modal>
   </SafeAreaView>;
@@ -681,5 +745,5 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: color.white }, center: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 160 },
   authShell: { flex: 1, backgroundColor: "#FFFFFF" }, authFlex: { flex: 1 }, authTopBar: { height: 58, backgroundColor: "#FFD440", borderBottomWidth: 2, borderBottomColor: "#141111", paddingHorizontal: 20, justifyContent: "center" }, authLogo: { width: 118, height: 30 }, authContent: { flexGrow: 1, justifyContent: "center", paddingHorizontal: 20, paddingVertical: 40 }, authForm: { width: "100%", maxWidth: 420, alignSelf: "center" }, authTitle: { color: "#141111", fontSize: 24, fontWeight: "700", textAlign: "center", marginBottom: 20 }, authDescription: { color: "#141111", opacity: 0.6, fontSize: 14, lineHeight: 20, textAlign: "center", marginTop: -8, marginBottom: 20 }, authStrong: { fontWeight: "700", fontFamily: Platform.OS === "ios" ? "Menlo" : undefined }, authBanner: { backgroundColor: "#FFF0E8", borderWidth: 2, borderColor: "#141111", padding: 10, marginBottom: 16 }, authBannerText: { color: "#141111", fontSize: 13, fontWeight: "700" }, authField: { marginBottom: 16 }, authLabel: { color: "#141111", fontSize: 14, fontWeight: "700", marginBottom: 5 }, authInput: { minHeight: 44, borderWidth: 2, borderColor: "#141111", paddingHorizontal: 10, paddingVertical: 8, fontSize: 16, color: "#141111", backgroundColor: "#FFFFFF", shadowColor: "#141111", shadowOffset: { width: 2, height: 2 }, shadowOpacity: 1, shadowRadius: 0, elevation: 2 }, authPrimary: { minHeight: 48, backgroundColor: "#FE7DA8", borderWidth: 2, borderColor: "#141111", alignItems: "center", justifyContent: "center", shadowColor: "#141111", shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0, elevation: 4, marginTop: 2, marginBottom: 18 }, authPrimaryText: { color: "#141111", fontSize: 15, fontWeight: "700" }, authDisabled: { opacity: 0.45 }, authLink: { color: "#141111", fontSize: 14, fontWeight: "700", textAlign: "center", textDecorationLine: "underline", marginBottom: 14 }, authPrompt: { color: "#141111", fontSize: 14, textAlign: "center", marginBottom: 12 }, authLinkInline: { color: "#FE7DA8", fontWeight: "700", textDecorationLine: "underline" }, legalAgreement: { color: "#141111", opacity: 0.6, fontSize: 12, lineHeight: 18, textAlign: "center", marginTop: 4 },
   legalRow: { flexDirection: "row", alignItems: "center", marginBottom: 16 }, checkbox: { width: 22, height: 22, borderWidth: 2, borderColor: "#141111", marginRight: 8, alignItems: "center", justifyContent: "center" }, checkboxChecked: { backgroundColor: "#FFD440" }, checkmark: { color: "#141111", fontWeight: "800" }, legalText: { flex: 1, color: "#141111", fontSize: 13 }, error: { color: "#B91C1C", fontSize: 13 }, errorBar: { backgroundColor: "#FEF2F2", padding: 8 },
-  header: { height: 54, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: color.line, flexDirection: "row", alignItems: "center" }, headerBack: { flexShrink: 0 }, headerRight: { flexShrink: 0, flexDirection: "row", alignItems: "center", gap: 4 }, headerAction: { color: color.blue, fontSize: 14, paddingHorizontal: 4 }, headerActionDisabled: { opacity: 0.45 }, headerTitle: { flex: 1, minWidth: 0, marginHorizontal: 8, color: color.ink, fontSize: 17, fontWeight: "700", textAlign: "center" }, listPad: { paddingBottom: 20 }, conversationRow: { minHeight: 68, justifyContent: "center", borderBottomWidth: 1, borderBottomColor: color.line, paddingHorizontal: 18 }, rowTitle: { color: color.ink, fontSize: 16, fontWeight: "600" }, muted: { color: color.muted, fontSize: 12, marginTop: 3 }, chat: { flex: 1 }, threadParent: { padding: 10, backgroundColor: color.bg, borderBottomWidth: 1, borderBottomColor: color.line }, focusedMessageCard: { marginHorizontal: 14, marginTop: 10, padding: 12, borderRadius: 12, backgroundColor: color.mine, borderWidth: 2, borderColor: color.blue }, focusedMessageLabel: { color: color.blue, fontSize: 12, fontWeight: "700", marginBottom: 4 }, messages: { paddingHorizontal: 14, paddingTop: 14, paddingBottom: 8 }, message: { padding: 10, marginBottom: 8, borderRadius: 12, backgroundColor: color.bg }, highlightedMessage: { borderWidth: 2, borderColor: color.blue, backgroundColor: color.mine }, messageHeader: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }, sender: { color: color.ink, fontSize: 13, fontWeight: "700" }, time: { color: color.muted, fontSize: 11 }, content: { color: color.ink, fontSize: 16, lineHeight: 23 }, attachmentRow: { marginTop: 7, padding: 8, borderRadius: 8, backgroundColor: color.white, borderWidth: 1, borderColor: color.line }, attachmentLabel: { color: color.ink, fontSize: 13, fontWeight: "600" }, mentionSummary: { color: color.blue, fontSize: 12, marginTop: 7 }, composer: { position: "relative", borderTopWidth: 1, borderTopColor: color.line, padding: 10, backgroundColor: color.white }, composerTools: { flexDirection: "row", alignItems: "center", marginBottom: 6, minHeight: 28 }, toolButton: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: color.bg }, toolLabel: { color: color.blue, fontSize: 13, fontWeight: "700" }, attachmentPending: { flex: 1, color: color.muted, fontSize: 12, marginLeft: 8 }, composerInput: { maxHeight: 140, minHeight: 44, padding: 10, paddingRight: 78, borderRadius: 12, borderWidth: 1, borderColor: color.line, fontSize: 16, color: color.ink }, send: { position: "absolute", right: 10, bottom: 10, minHeight: 44, justifyContent: "center", paddingHorizontal: 14, backgroundColor: color.blue, borderRadius: 12 }, disabled: { opacity: 0.4 }, sendLabel: { color: color.white, fontWeight: "700" }, mentionMenu: { position: "absolute", left: 10, right: 10, bottom: 64, maxHeight: 220, backgroundColor: color.white, borderWidth: 1, borderColor: color.line, borderRadius: 10, shadowColor: color.ink, shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.12, shadowRadius: 6, elevation: 3 }, mentionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: color.line }, mentionName: { color: color.ink, fontSize: 14, fontWeight: "600" }, previewBackdrop: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.92)", padding: 20 }, previewClose: { position: "absolute", top: 56, right: 20, padding: 10 }, previewCloseLabel: { color: color.white, fontWeight: "700" }, previewImage: { width: "100%", height: "75%" }, previewDocument: { width: "100%", maxHeight: "70%", backgroundColor: color.white, padding: 14 }, previewDocumentContent: { paddingBottom: 12 }, previewCaption: { color: color.white, marginTop: 12 }, notice: { position: "absolute", bottom: 92, left: 12, right: 12, padding: 12, borderRadius: 10, backgroundColor: color.ink }, noticeText: { color: color.white }
+  header: { height: 54, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: color.line, flexDirection: "row", alignItems: "center" }, headerBack: { flexShrink: 0 }, headerRight: { flexShrink: 0, flexDirection: "row", alignItems: "center", gap: 4 }, headerAction: { color: color.blue, fontSize: 14, paddingHorizontal: 4 }, headerActionDisabled: { opacity: 0.45 }, headerTitle: { flex: 1, minWidth: 0, marginHorizontal: 8, color: color.ink, fontSize: 17, fontWeight: "700", textAlign: "center" }, listPad: { paddingBottom: 20 }, conversationRow: { minHeight: 68, justifyContent: "center", borderBottomWidth: 1, borderBottomColor: color.line, paddingHorizontal: 18 }, rowTitle: { color: color.ink, fontSize: 16, fontWeight: "600" }, muted: { color: color.muted, fontSize: 12, marginTop: 3 }, chat: { flex: 1 }, threadParent: { padding: 10, backgroundColor: color.bg, borderBottomWidth: 1, borderBottomColor: color.line }, focusedMessageCard: { marginHorizontal: 14, marginTop: 10, padding: 12, borderRadius: 12, backgroundColor: color.mine, borderWidth: 2, borderColor: color.blue }, focusedMessageLabel: { color: color.blue, fontSize: 12, fontWeight: "700", marginBottom: 4 }, messages: { paddingHorizontal: 14, paddingTop: 14, paddingBottom: 8 }, message: { padding: 10, marginBottom: 8, borderRadius: 12, backgroundColor: color.bg }, highlightedMessage: { borderWidth: 2, borderColor: color.blue, backgroundColor: color.mine }, messageHeader: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }, sender: { color: color.ink, fontSize: 13, fontWeight: "700" }, time: { color: color.muted, fontSize: 11 }, content: { color: color.ink, fontSize: 16, lineHeight: 23 }, attachmentRow: { marginTop: 7, padding: 8, borderRadius: 8, backgroundColor: color.white, borderWidth: 1, borderColor: color.line }, attachmentLabel: { color: color.ink, fontSize: 13, fontWeight: "600" }, mentionSummary: { color: color.blue, fontSize: 12, marginTop: 7 }, newMessageBar: { position: "absolute", left: 12, right: 12, bottom: 88, alignItems: "center" }, newMessageButton: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18, backgroundColor: color.blue, shadowColor: color.ink, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.18, shadowRadius: 4, elevation: 3 }, newMessageText: { color: color.white, fontSize: 13, fontWeight: "700" }, composer: { position: "relative", borderTopWidth: 1, borderTopColor: color.line, padding: 10, backgroundColor: color.white }, composerTools: { flexDirection: "row", alignItems: "center", marginBottom: 6, minHeight: 28 }, toolButton: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: color.bg }, toolLabel: { color: color.blue, fontSize: 13, fontWeight: "700" }, attachmentPending: { flex: 1, color: color.muted, fontSize: 12, marginLeft: 8 }, composerInput: { maxHeight: 140, minHeight: 44, padding: 10, paddingRight: 78, borderRadius: 12, borderWidth: 1, borderColor: color.line, fontSize: 16, color: color.ink }, send: { position: "absolute", right: 10, bottom: 10, minHeight: 44, justifyContent: "center", paddingHorizontal: 14, backgroundColor: color.blue, borderRadius: 12 }, disabled: { opacity: 0.4 }, sendLabel: { color: color.white, fontWeight: "700" }, mentionMenu: { position: "absolute", left: 10, right: 10, bottom: 64, maxHeight: 220, backgroundColor: color.white, borderWidth: 1, borderColor: color.line, borderRadius: 10, shadowColor: color.ink, shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.12, shadowRadius: 6, elevation: 3 }, mentionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: color.line }, mentionName: { color: color.ink, fontSize: 14, fontWeight: "600" }, previewBackdrop: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.92)", padding: 20 }, previewClose: { position: "absolute", top: 56, right: 20, padding: 10 }, previewCloseLabel: { color: color.white, fontWeight: "700" }, previewImage: { width: "100%", height: "75%" }, previewDocument: { width: "100%", maxHeight: "70%", backgroundColor: color.white, padding: 14 }, previewDocumentContent: { paddingBottom: 12 }, previewCaption: { color: color.white, marginTop: 12 }, notice: { position: "absolute", bottom: 92, left: 12, right: 12, padding: 12, borderRadius: 10, backgroundColor: color.ink }, noticeText: { color: color.white }
 });
