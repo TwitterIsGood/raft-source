@@ -172,11 +172,15 @@ export default function App() {
     programmaticLatestScrollRef.current = false;
     updateMessageAttention(clearMessageAttention());
   };
+  const scrollListToLatest = () => {
+    list.current?.scrollToOffset({ offset: 0, animated: false });
+    if (messagesRef.current.length > 0) list.current?.scrollToIndex({ index: 0, animated: false, viewPosition: 0 });
+  };
   const scrollToLatest = () => {
     followLatestOnContentChangeRef.current = false;
     programmaticLatestScrollRef.current = false;
     updateMessageAttention(setMessageLatestState(messageAttentionRef.current, true));
-    list.current?.scrollToOffset({ offset: 0, animated: true });
+    scrollListToLatest();
   };
   const handleMessageScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     // FlatList is inverted: offset 0 is the newest edge, while a larger
@@ -189,9 +193,9 @@ export default function App() {
   };
   const handleMessageContentSizeChange = () => {
     if (!followLatestOnContentChangeRef.current) return;
-    list.current?.scrollToOffset({ offset: 0, animated: false });
+    scrollListToLatest();
     setTimeout(() => {
-      if (followLatestOnContentChangeRef.current && messageAttentionRef.current.isAtLatest) list.current?.scrollToOffset({ offset: 0, animated: false });
+      if (followLatestOnContentChangeRef.current && messageAttentionRef.current.isAtLatest) scrollListToLatest();
     }, 80);
   };
   useEffect(() => {
@@ -199,7 +203,7 @@ export default function App() {
     // Inverted FlatList + maintainVisibleContentPosition can settle native
     // layout across more than one frame when sync delivers adjacent rows.
     const timers = [0, 80, 240, 500].map((delay) => setTimeout(() => {
-      if (followLatestOnContentChangeRef.current && messageAttentionRef.current.isAtLatest) list.current?.scrollToOffset({ offset: 0, animated: false });
+      if (followLatestOnContentChangeRef.current && messageAttentionRef.current.isAtLatest) scrollListToLatest();
       if (delay === 500 && messageAttentionRef.current.isAtLatest) {
         followLatestOnContentChangeRef.current = false;
         programmaticLatestScrollRef.current = false;
