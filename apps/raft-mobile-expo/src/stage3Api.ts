@@ -1,4 +1,5 @@
 import { api } from "./api";
+import type { Stage3ServerRole } from "./stage3Navigation";
 
 export type MobileTaskStatus = "todo" | "in_progress" | "in_review" | "done" | "closed";
 export type MobileTask = {
@@ -22,7 +23,7 @@ export type MobileMember = {
   displayName: string | null;
   description: string | null;
   avatarUrl: string | null;
-  role: string;
+  role: Stage3ServerRole;
   joinedAt: string;
 };
 export type MobileComputer = {
@@ -77,6 +78,12 @@ export function getWikiPage(serverId: string, artifactId: string): Promise<WikiP
 }
 export function getServerMembers(serverId: string): Promise<MobileMember[]> {
   return api(`/api/servers/${encodeURIComponent(serverId)}/members`, {}, serverId);
+}
+export function updateServerMemberRole(serverId: string, userId: string, role: Stage3ServerRole): Promise<{ ok: boolean; changed: boolean }> {
+  return api(`/api/servers/${encodeURIComponent(serverId)}/members/${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ role }),
+  }, serverId);
 }
 export async function getServerComputers(serverId: string): Promise<MobileComputer[]> {
   const response = await api<MobileComputer[] | { machines?: MobileComputer[] }>(`/api/servers/${encodeURIComponent(serverId)}/machines`, {}, serverId);

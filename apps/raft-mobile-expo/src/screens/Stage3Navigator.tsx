@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Image, Keyboard, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { getChannels } from "../api";
+import { getCurrentUser } from "../settingsApi";
 import { API_BASE_URL } from "../config";
-import { claimTask, createTask, getServerComputers, getServerMembers, getServerTasks, getWikiDirectory, getWikiPage, getWikiStatus, refreshWiki, setTaskStatus, updateServerComputer, type MobileComputer, type MobileMember, type MobileTask, type WikiArtifact, type WikiPage } from "../stage3Api";
-import { filterStage3Members, STAGE3_ROUTES, type Stage3Route } from "../stage3Navigation";
+import { claimTask, createTask, getServerComputers, getServerMembers, getServerTasks, getWikiDirectory, getWikiPage, getWikiStatus, refreshWiki, setTaskStatus, updateServerComputer, updateServerMemberRole, type MobileComputer, type MobileMember, type MobileTask, type WikiArtifact, type WikiPage } from "../stage3Api";
+import { filterStage3Members, getEditableStage3MemberRoles, STAGE3_ROUTES, type Stage3Route, type Stage3ServerRole } from "../stage3Navigation";
 import { isWikiExternalUrl, parseWikiBlocks, resolveWikiAssetUrl, splitWikiInline, type WikiBlock } from "../wikiRender";
 
 type Props = { serverId: string };
@@ -95,11 +96,36 @@ function WikiInline({ text }: { text: string }) {
 }
 
 function MembersPanel({ serverId }: Props) {
-  const [rows, setRows] = useState<MobileMember[]>([]); const [query, setQuery] = useState(""); const [error, setError] = useState<string | null>(null);
+  const [rows, setRows] = useState<MobileMember[]>([]); const [query, setQuery] = useState(""); const [error, setError] = useState<string | null>(null); const [actorUserId, setActorUserId] = useState<string | null>(null); const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const visibleRows = filterStage3Members(rows, query);
-  useEffect(() => { let cancelled = false; getServerMembers(serverId).then((items) => { if (!cancelled) setRows(items); }).catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); }); return () => { cancelled = true; }; }, [serverId]);
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const [items, user] = await Promise.all([getServerMembers(serverId), getCurrentUser()]);
+      setRows(items);
+      setActorUserId(user.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [serverId]);
+  useEffect(() => { void load(); }, [load]);
+  const actorRole = rows.find((item) => item.userId === actorUserId)?.role ?? null;
+  const ownerCount = rows.filter((item) => item.role === "owner").length;
+  const roleLabel = (role: Stage3ServerRole) => role === "owner" ? "所有者" : role === "admin" ? "管理员" : role === "member" ? "成员" : "访客";
+  const saveRole = async (member: MobileMember, nextRole: Stage3ServerRole) => {
+    setBusyUserId(member.userId); setError(null);
+    try {
+      await updateServerMemberRole(serverId, member.userId, nextRole);
+      // Re-read the authoritative membership row after the mutation.
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyUserId(null);
+    }
+  };
   const emptyLabel = rows.length > 0 && query.trim() ? `没有匹配的成员：${query.trim()}` : "暂无成员";
-  return <View style={styles.panel}><Text style={styles.title}>成员</Text><TextInput accessibilityLabel="搜索成员" placeholder="搜索成员" value={query} onChangeText={setQuery} style={styles.filterInput} autoCapitalize="none" autoCorrect={false} /><ErrorText message={error} /><FlatList data={visibleRows} keyExtractor={(item) => item.userId} contentContainerStyle={styles.list} ListEmptyComponent={<Text style={styles.empty}>{emptyLabel}</Text>} renderItem={({ item }) => <View style={styles.card}><Text style={styles.cardTitle}>{item.displayName || item.name}</Text><Text style={styles.meta}>{item.role}</Text>{item.description ? <Text style={styles.bodyText}>{item.description}</Text> : null}</View>} /></View>;
+  return <View style={styles.panel}><View style={styles.header}><Text style={styles.title}>成员</Text><Pressable accessibilityRole="button" accessibilityLabel="刷新成员" onPress={() => void load()}><Text style={styles.action}>刷新</Text></Pressable></View><TextInput accessibilityLabel="搜索成员" placeholder="搜索成员" value={query} onChangeText={setQuery} style={styles.filterInput} autoCapitalize="none" autoCorrect={false} /><ErrorText message={error} /><FlatList data={visibleRows} keyExtractor={(item) => item.userId} contentContainerStyle={styles.list} ListEmptyComponent={<Text style={styles.empty}>{emptyLabel}</Text>} renderItem={({ item }) => { const roles = getEditableStage3MemberRoles({ actorRole, targetRole: item.role, isSelf: item.userId === actorUserId, ownerCount }); return <View style={styles.card}><Text style={styles.cardTitle}>{item.displayName || item.name}</Text><Text style={styles.meta}>角色：{roleLabel(item.role)}</Text>{item.description ? <Text style={styles.bodyText}>{item.description}</Text> : null}{roles.length ? <View style={styles.cardActions}>{roles.map((role) => <Pressable key={role} accessibilityRole="button" accessibilityLabel={`将 ${item.displayName || item.name} 设为${roleLabel(role)}`} disabled={busyUserId === item.userId} onPress={() => void saveRole(item, role)}><Text style={[styles.action, busyUserId === item.userId && styles.disabledText]}>设为{roleLabel(role)}</Text></Pressable>)}</View> : null}</View>; }} /></View>;
 }
 
 function ComputersPanel({ serverId }: Props) {

@@ -14,6 +14,32 @@ export type Stage3MemberSearchRow = {
   displayName?: string | null;
 };
 
+export type Stage3ServerRole = "owner" | "admin" | "member" | "guest";
+
+/**
+ * Match the Web member-role editor and the server transition policy.
+ * Guest admission is deliberately excluded from this mobile foundation pass.
+ */
+export function getEditableStage3MemberRoles(input: {
+  actorRole: Stage3ServerRole | null | undefined;
+  targetRole: Stage3ServerRole;
+  isSelf: boolean;
+  ownerCount: number;
+  guestEnabled?: boolean;
+}): Stage3ServerRole[] {
+  const { actorRole, targetRole, isSelf, ownerCount, guestEnabled = false } = input;
+  if (isSelf || !actorRole || actorRole === "member" || actorRole === "guest") return [];
+  const candidates: Stage3ServerRole[] = ["owner", "admin", "member"];
+  if (guestEnabled) candidates.push("guest");
+  return candidates.filter((nextRole) => {
+    if (nextRole === targetRole) return false;
+    if (targetRole === "guest" && !guestEnabled) return false;
+    if (targetRole === "owner" && nextRole !== "owner" && ownerCount <= 1) return false;
+    if (actorRole === "owner") return true;
+    return actorRole === "admin" && targetRole === "member" && nextRole === "admin";
+  });
+}
+
 /** Match the Web members page: handle or display name, case-insensitive. */
 export function filterStage3Members<T extends Stage3MemberSearchRow>(rows: readonly T[], query: string): T[] {
   const normalized = query.trim().toLocaleLowerCase();
