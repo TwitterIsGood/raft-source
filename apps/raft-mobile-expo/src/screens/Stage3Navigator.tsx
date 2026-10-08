@@ -5,7 +5,7 @@ import { getSessionGeneration } from "../session";
 import { getCurrentUser } from "../settingsApi";
 import { API_BASE_URL } from "../config";
 import { claimTask, createTask, getServerComputers, getServerMembers, getServerTasks, getWikiDirectory, getWikiPage, getWikiStatus, refreshWiki, setTaskStatus, updateServerComputer, updateServerMemberRole, type MobileComputer, type MobileMember, type MobileTask, type WikiArtifact, type WikiPage } from "../stage3Api";
-import { createStage3RequestTracker, filterStage3Members, getEditableStage3MemberRoles, STAGE3_ROUTES, type Stage3Route, type Stage3ServerRole } from "../stage3Navigation";
+import { createStage3RequestTracker, filterStage3Members, getEditableStage3MemberRoles, isStage3ResponseCurrent, STAGE3_ROUTES, type Stage3Route, type Stage3ServerRole } from "../stage3Navigation";
 import { isWikiExternalUrl, parseWikiBlocks, resolveWikiAssetUrl, splitWikiInline, type WikiBlock } from "../wikiRender";
 
 type Props = { serverId: string };
@@ -110,13 +110,13 @@ function MembersPanel({ serverId }: Props) {
     setError(null);
     try {
       const [items, user] = await Promise.all([getServerMembers(serverId), getCurrentUser()]);
-      if (!requestTracker.current.isCurrent(token) || getSessionGeneration() !== sessionGeneration || (expectedMutation !== undefined && mutationGeneration.current !== expectedMutation)) return false;
+      if (!isStage3ResponseCurrent(requestTracker.current, token, sessionGeneration, getSessionGeneration()) || (expectedMutation !== undefined && mutationGeneration.current !== expectedMutation)) return false;
       setRows(items);
       setActorUserId(user.id);
       setLoading(false);
       return true;
     } catch (e) {
-      if (requestTracker.current.isCurrent(token) && (expectedMutation === undefined || mutationGeneration.current === expectedMutation)) { setError(e instanceof Error ? e.message : String(e)); setLoading(false); }
+      if (isStage3ResponseCurrent(requestTracker.current, token, sessionGeneration, getSessionGeneration()) && (expectedMutation === undefined || mutationGeneration.current === expectedMutation)) { setError(e instanceof Error ? e.message : String(e)); setLoading(false); }
       return false;
     }
   }, [serverId]);

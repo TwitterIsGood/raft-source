@@ -17,6 +17,7 @@ export type Stage3MemberSearchRow = {
 export type Stage3ServerRole = "owner" | "admin" | "member" | "guest";
 
 export type Stage3RequestToken = { scope: number; request: number };
+export type Stage3RequestTracker = ReturnType<typeof createStage3RequestTracker>;
 
 /** Guard late member loads after a workspace switch or a newer request. */
 export function createStage3RequestTracker() {
@@ -41,6 +42,11 @@ export function createStage3RequestTracker() {
       return value === scope;
     },
   };
+}
+
+/** Keep both late responses and late errors from mutating a newer session. */
+export function isStage3ResponseCurrent(tracker: Stage3RequestTracker, token: Stage3RequestToken, expectedSessionGeneration: number, currentSessionGeneration: number) {
+  return tracker.isCurrent(token) && expectedSessionGeneration === currentSessionGeneration;
 }
 
 /**

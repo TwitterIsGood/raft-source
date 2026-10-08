@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createStage3RequestTracker, filterStage3Members, getEditableStage3MemberRoles, isStage3Route, STAGE3_ROUTES } from "./stage3Navigation.ts";
+import { createStage3RequestTracker, filterStage3Members, getEditableStage3MemberRoles, isStage3ResponseCurrent, isStage3Route, STAGE3_ROUTES } from "./stage3Navigation.ts";
 
 test("stage3 workspace routes cover tasks, wiki, members and computers", () => {
   assert.deepEqual(STAGE3_ROUTES.map((item) => item.route), ["tasks", "wiki", "members", "computers"]);
@@ -39,4 +39,14 @@ test("stage3 member request tracker rejects late workspace and request responses
   tracker.beginScope();
   assert.equal(tracker.isScopeCurrent(first.scope), false);
   assert.equal(tracker.isCurrent(second), false);
+});
+
+test("stage3 late load errors are rejected after a newer request or session", () => {
+  const tracker = createStage3RequestTracker();
+  tracker.beginScope();
+  const stale = tracker.beginRequest();
+  const current = tracker.beginRequest();
+  assert.equal(isStage3ResponseCurrent(tracker, stale, 4, 4), false);
+  assert.equal(isStage3ResponseCurrent(tracker, current, 4, 5), false);
+  assert.equal(isStage3ResponseCurrent(tracker, current, 4, 4), true);
 });
