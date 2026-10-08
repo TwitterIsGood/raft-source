@@ -104,6 +104,7 @@ export default function App() {
   const messagesReadyRef = useRef(false);
   const messageAttentionRef = useRef(createMessageAttentionState());
   const followLatestOnContentChangeRef = useRef(false);
+  const programmaticLatestScrollRef = useRef(false);
   const navigationRef = useRef<{ serverId: string; channelId: string; messageId?: string } | null>(null);
   const focusMessageRef = useRef<string | null>(null);
   const sessionEpochRef = useRef(getSessionGeneration());
@@ -168,9 +169,12 @@ export default function App() {
   };
   const resetMessageAttention = () => {
     followLatestOnContentChangeRef.current = false;
+    programmaticLatestScrollRef.current = false;
     updateMessageAttention(clearMessageAttention());
   };
   const scrollToLatest = () => {
+    followLatestOnContentChangeRef.current = false;
+    programmaticLatestScrollRef.current = false;
     updateMessageAttention(setMessageLatestState(messageAttentionRef.current, true));
     list.current?.scrollToOffset({ offset: 0, animated: true });
   };
@@ -178,14 +182,31 @@ export default function App() {
     // FlatList is inverted: offset 0 is the newest edge, while a larger
     // offset means the reader is browsing older history.
     const isAtLatest = event.nativeEvent.contentOffset.y <= 24;
-    if (!isAtLatest) followLatestOnContentChangeRef.current = false;
+    if (!isAtLatest && programmaticLatestScrollRef.current) return;
+    if (!isAtLatest && !programmaticLatestScrollRef.current) followLatestOnContentChangeRef.current = false;
+    if (isAtLatest) programmaticLatestScrollRef.current = false;
     updateMessageAttention(setMessageLatestState(messageAttentionRef.current, isAtLatest));
   };
   const handleMessageContentSizeChange = () => {
     if (!followLatestOnContentChangeRef.current) return;
-    followLatestOnContentChangeRef.current = false;
     list.current?.scrollToOffset({ offset: 0, animated: false });
+    setTimeout(() => {
+      if (followLatestOnContentChangeRef.current && messageAttentionRef.current.isAtLatest) list.current?.scrollToOffset({ offset: 0, animated: false });
+    }, 80);
   };
+  useEffect(() => {
+    if (!followLatestOnContentChangeRef.current || !messageAttentionRef.current.isAtLatest) return;
+    // Inverted FlatList + maintainVisibleContentPosition can settle native
+    // layout across more than one frame when sync delivers adjacent rows.
+    const timers = [0, 80, 240, 500].map((delay) => setTimeout(() => {
+      if (followLatestOnContentChangeRef.current && messageAttentionRef.current.isAtLatest) list.current?.scrollToOffset({ offset: 0, animated: false });
+      if (delay === 500 && messageAttentionRef.current.isAtLatest) {
+        followLatestOnContentChangeRef.current = false;
+        programmaticLatestScrollRef.current = false;
+      }
+    }, delay));
+    return () => timers.forEach(clearTimeout);
+  }, [messages]);
   const open = (item: Channel, parent: Message | null = null, focusMessageId?: string) => { composerOperationRef.current += 1; focusMessageRef.current = focusMessageId ?? null; resetMessageAttention(); messagesReadyRef.current = false; messagesRef.current = []; setMessages([]); setHighlightedMessageId(null); setActive(item); activeRef.current = item; setThreadParent(parent); if (!parent) setThreadOrigin(null); setMode("chat"); setError(null); setUploading(false); setSending(false); clearComposerAttachments(); clearAttachmentUrls(); setSelectedMentions([]); setMentionTrigger(null); setMentionQuery(""); setCursorPosition(0); };
   const back = () => {
     if (mode === "chat" && threadParent && threadOrigin) { open(threadOrigin); return; }
@@ -283,6 +304,7 @@ export default function App() {
       if (messageAttentionRef.current.isAtLatest) {
         // The reader was already at the newest edge, so follow the new row.
         followLatestOnContentChangeRef.current = true;
+        programmaticLatestScrollRef.current = true;
       } else {
         updateMessageAttention(noteNewMessage(messageAttentionRef.current, row.id, true));
       }
