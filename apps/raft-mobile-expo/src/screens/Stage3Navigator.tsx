@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Image, Keyboard, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { getChannels } from "../api";
+import { getSessionGeneration } from "../session";
 import { getCurrentUser } from "../settingsApi";
 import { API_BASE_URL } from "../config";
 import { claimTask, createTask, getServerComputers, getServerMembers, getServerTasks, getWikiDirectory, getWikiPage, getWikiStatus, refreshWiki, setTaskStatus, updateServerComputer, updateServerMemberRole, type MobileComputer, type MobileMember, type MobileTask, type WikiArtifact, type WikiPage } from "../stage3Api";
-import { filterStage3Members, getEditableStage3MemberRoles, STAGE3_ROUTES, type Stage3Route, type Stage3ServerRole } from "../stage3Navigation";
+import { createStage3RequestTracker, filterStage3Members, getEditableStage3MemberRoles, STAGE3_ROUTES, type Stage3Route, type Stage3ServerRole } from "../stage3Navigation";
 import { isWikiExternalUrl, parseWikiBlocks, resolveWikiAssetUrl, splitWikiInline, type WikiBlock } from "../wikiRender";
 
 type Props = { serverId: string };
@@ -96,36 +97,61 @@ function WikiInline({ text }: { text: string }) {
 }
 
 function MembersPanel({ serverId }: Props) {
-  const [rows, setRows] = useState<MobileMember[]>([]); const [query, setQuery] = useState(""); const [error, setError] = useState<string | null>(null); const [actorUserId, setActorUserId] = useState<string | null>(null); const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [rows, setRows] = useState<MobileMember[]>([]); const [query, setQuery] = useState(""); const [error, setError] = useState<string | null>(null); const [actorUserId, setActorUserId] = useState<string | null>(null); const [busyUserId, setBusyUserId] = useState<string | null>(null); const [loading, setLoading] = useState(true);
+  const requestTracker = useRef(createStage3RequestTracker()); const mutationGeneration = useRef(0);
   const visibleRows = filterStage3Members(rows, query);
-  const load = useCallback(async () => {
+  const load = useCallback(async (expectedMutation?: number) => {
+    const token = requestTracker.current.beginRequest();
+    const sessionGeneration = getSessionGeneration();
+    setLoading(true);
+    setRows([]);
+    setActorUserId(null);
+    if (expectedMutation === undefined) setBusyUserId(null);
     setError(null);
     try {
       const [items, user] = await Promise.all([getServerMembers(serverId), getCurrentUser()]);
+      if (!requestTracker.current.isCurrent(token) || getSessionGeneration() !== sessionGeneration || (expectedMutation !== undefined && mutationGeneration.current !== expectedMutation)) return false;
       setRows(items);
       setActorUserId(user.id);
+      setLoading(false);
+      return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (requestTracker.current.isCurrent(token) && (expectedMutation === undefined || mutationGeneration.current === expectedMutation)) { setError(e instanceof Error ? e.message : String(e)); setLoading(false); }
+      return false;
     }
   }, [serverId]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    requestTracker.current.beginScope();
+    mutationGeneration.current += 1;
+    // Do not let the previous workspace's rows or actor permissions remain
+    // visible while the new scope is loading.
+    setRows([]);
+    setActorUserId(null);
+    setBusyUserId(null);
+    void load();
+    return () => { requestTracker.current.beginScope(); mutationGeneration.current += 1; };
+  }, [load]);
   const actorRole = rows.find((item) => item.userId === actorUserId)?.role ?? null;
   const ownerCount = rows.filter((item) => item.role === "owner").length;
+  const membersReady = !loading && actorUserId !== null;
   const roleLabel = (role: Stage3ServerRole) => role === "owner" ? "所有者" : role === "admin" ? "管理员" : role === "member" ? "成员" : "访客";
   const saveRole = async (member: MobileMember, nextRole: Stage3ServerRole) => {
+    const scope = requestTracker.current.currentScope(); const operation = ++mutationGeneration.current; const sessionGeneration = getSessionGeneration();
     setBusyUserId(member.userId); setError(null);
     try {
+      if (!requestTracker.current.isScopeCurrent(scope) || getSessionGeneration() !== sessionGeneration) return;
       await updateServerMemberRole(serverId, member.userId, nextRole);
+      if (!requestTracker.current.isScopeCurrent(scope) || getSessionGeneration() !== sessionGeneration || mutationGeneration.current !== operation) return;
       // Re-read the authoritative membership row after the mutation.
-      await load();
+      await load(operation);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (requestTracker.current.isScopeCurrent(scope) && mutationGeneration.current === operation && getSessionGeneration() === sessionGeneration) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusyUserId(null);
+      if (requestTracker.current.isScopeCurrent(scope) && mutationGeneration.current === operation && getSessionGeneration() === sessionGeneration) setBusyUserId(null);
     }
   };
   const emptyLabel = rows.length > 0 && query.trim() ? `没有匹配的成员：${query.trim()}` : "暂无成员";
-  return <View style={styles.panel}><View style={styles.header}><Text style={styles.title}>成员</Text><Pressable accessibilityRole="button" accessibilityLabel="刷新成员" onPress={() => void load()}><Text style={styles.action}>刷新</Text></Pressable></View><TextInput accessibilityLabel="搜索成员" placeholder="搜索成员" value={query} onChangeText={setQuery} style={styles.filterInput} autoCapitalize="none" autoCorrect={false} /><ErrorText message={error} /><FlatList data={visibleRows} keyExtractor={(item) => item.userId} contentContainerStyle={styles.list} ListEmptyComponent={<Text style={styles.empty}>{emptyLabel}</Text>} renderItem={({ item }) => { const roles = getEditableStage3MemberRoles({ actorRole, targetRole: item.role, isSelf: item.userId === actorUserId, ownerCount }); return <View style={styles.card}><Text style={styles.cardTitle}>{item.displayName || item.name}</Text><Text style={styles.meta}>角色：{roleLabel(item.role)}</Text>{item.description ? <Text style={styles.bodyText}>{item.description}</Text> : null}{roles.length ? <View style={styles.cardActions}>{roles.map((role) => <Pressable key={role} accessibilityRole="button" accessibilityLabel={`将 ${item.displayName || item.name} 设为${roleLabel(role)}`} disabled={busyUserId === item.userId} onPress={() => void saveRole(item, role)}><Text style={[styles.action, busyUserId === item.userId && styles.disabledText]}>设为{roleLabel(role)}</Text></Pressable>)}</View> : null}</View>; }} /></View>;
+  return <View style={styles.panel}><View style={styles.header}><Text style={styles.title}>成员</Text><Pressable accessibilityRole="button" accessibilityLabel="刷新成员" disabled={loading} onPress={() => void load()}><Text style={[styles.action, loading && styles.disabledText]}>刷新</Text></Pressable></View><TextInput accessibilityLabel="搜索成员" placeholder="搜索成员" value={query} onChangeText={setQuery} style={styles.filterInput} autoCapitalize="none" autoCorrect={false} /><ErrorText message={error} />{loading ? <ActivityIndicator accessibilityLabel="加载成员" /> : null}<FlatList data={visibleRows} keyExtractor={(item) => item.userId} contentContainerStyle={styles.list} ListEmptyComponent={<Text style={styles.empty}>{emptyLabel}</Text>} renderItem={({ item }) => { const roles = membersReady ? getEditableStage3MemberRoles({ actorRole, targetRole: item.role, isSelf: item.userId === actorUserId, ownerCount }) : []; return <View style={styles.card}><Text style={styles.cardTitle}>{item.displayName || item.name}</Text><Text style={styles.meta}>角色：{roleLabel(item.role)}</Text>{item.description ? <Text style={styles.bodyText}>{item.description}</Text> : null}{roles.length ? <View style={styles.cardActions}>{roles.map((role) => { const activate = () => void saveRole(item, role); return <Pressable key={role} accessibilityRole="button" accessibilityLabel={`将 ${item.displayName || item.name} 设为${roleLabel(role)}`} disabled={busyUserId === item.userId} onPress={activate}><Text style={[styles.action, busyUserId === item.userId && styles.disabledText]}>设为{roleLabel(role)}</Text></Pressable>; })}</View> : null}</View>; }} /></View>;
 }
 
 function ComputersPanel({ serverId }: Props) {

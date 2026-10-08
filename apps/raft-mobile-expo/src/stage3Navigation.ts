@@ -16,6 +16,33 @@ export type Stage3MemberSearchRow = {
 
 export type Stage3ServerRole = "owner" | "admin" | "member" | "guest";
 
+export type Stage3RequestToken = { scope: number; request: number };
+
+/** Guard late member loads after a workspace switch or a newer request. */
+export function createStage3RequestTracker() {
+  let scope = 0;
+  let request = 0;
+  return {
+    beginScope() {
+      scope += 1;
+      request += 1;
+    },
+    beginRequest(): Stage3RequestToken {
+      request += 1;
+      return { scope, request };
+    },
+    currentScope() {
+      return scope;
+    },
+    isCurrent(token: Stage3RequestToken) {
+      return token.scope === scope && token.request === request;
+    },
+    isScopeCurrent(value: number) {
+      return value === scope;
+    },
+  };
+}
+
 /**
  * Match the Web member-role editor and the server transition policy.
  * Guest admission is deliberately excluded from this mobile foundation pass.
