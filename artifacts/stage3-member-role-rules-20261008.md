@@ -2,7 +2,7 @@
 
 检查时间：2026-10-08 UTC  
 隔离 API：`http://127.0.0.1:13074`  
-客户端提交：待本轮提交生成
+客户端提交：`87dd0ab`（已推送 `feat/raft-mobile-expo`）
 
 ## Web/API 规则
 
@@ -34,3 +34,11 @@
 - owner 身份恢复 `PATCH admin → member`：HTTP 200，随后 GET 回读 `member`。
 
 本轮只访问 `127.0.0.1:13074`，未访问或修改生产 API、数据库、Redis、APNs。
+
+## 构建门禁
+
+- `npm run typecheck`：通过。
+- `npm test`：56/56 通过。
+- `git diff --check`：通过。
+- 隔离 Expo export/verify：`localHits=1`、`productionFiles=[]`。
+- Simulator Release Xcode build：`** BUILD SUCCEEDED **`，日志 `/tmp/raft-mobile-test/xcodebuild-role-87dd0ab.log`。
