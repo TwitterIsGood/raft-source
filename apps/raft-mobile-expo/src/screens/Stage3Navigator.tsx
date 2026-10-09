@@ -102,7 +102,7 @@ function MembersPanel({ serverId }: Props) {
   const [addOpen, setAddOpen] = useState(false); const [addUserId, setAddUserId] = useState(""); const [addRole, setAddRole] = useState<Exclude<Stage3ServerRole, "guest">>("member"); const [removeTarget, setRemoveTarget] = useState<MobileMember | null>(null);
   const [invites, setInvites] = useState<MobileInvite[]>([]); const [joinLinks, setJoinLinks] = useState<MobileJoinLink[]>([]); const [guestEnabled, setGuestEnabled] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false); const [inviteEmail, setInviteEmail] = useState(""); const [inviteRole, setInviteRole] = useState<"member" | "guest">("member"); const [inviteBusy, setInviteBusy] = useState(false); const [inviteError, setInviteError] = useState<string | null>(null); const [linkBusy, setLinkBusy] = useState(false); const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
-  const requestTracker = useRef(createStage3RequestTracker()); const mutationGeneration = useRef(0);
+  const requestTracker = useRef(createStage3RequestTracker()); const mutationGeneration = useRef(0); const inviteRequestGeneration = useRef(0);
   const visibleRows = filterStage3Members(rows, query);
   const load = useCallback(async (expectedMutation?: number) => {
     if (expectedMutation === undefined) mutationGeneration.current += 1;
@@ -133,6 +133,8 @@ function MembersPanel({ serverId }: Props) {
     setRows([]);
     setActorUserId(null);
     setBusyUserId(null);
+    inviteRequestGeneration.current += 1;
+    setInvites([]); setJoinLinks([]); setGuestEnabled(false); setInviteOpen(false); setInviteEmail(""); setInviteRole("member"); setInviteBusy(false); setLinkBusy(false); setCopiedLinkId(null); setInviteError(null);
     void load();
     return () => { requestTracker.current.beginScope(); mutationGeneration.current += 1; };
   }, [load]);
@@ -195,43 +197,63 @@ function MembersPanel({ serverId }: Props) {
     }
   };
   const loadInvites = useCallback(async () => {
-    if (!canInvite) { setInvites([]); setJoinLinks([]); setGuestEnabled(false); return; }
+    const operation = ++inviteRequestGeneration.current;
+    const scope = requestTracker.current.currentScope();
+    const sessionGeneration = getSessionGeneration();
+    const current = () => requestTracker.current.isScopeCurrent(scope)
+      && inviteRequestGeneration.current === operation
+      && getSessionGeneration() === sessionGeneration;
+    if (!canInvite) { if (current()) { setInvites([]); setJoinLinks([]); setGuestEnabled(false); } return; }
     try {
       const [inviteRows, linkRows, guest] = await Promise.all([getServerInvites(serverId), getServerJoinLinks(serverId), getServerGuestFlag(serverId)]);
-      setInvites(inviteRows); setJoinLinks(linkRows); setGuestEnabled(guest); setInviteError(null);
+      if (current()) { setInvites(inviteRows); setJoinLinks(linkRows); setGuestEnabled(guest); setInviteError(null); }
     } catch (e) {
-      setInviteError(stage3ErrorMessage(e));
+      if (current()) setInviteError(stage3ErrorMessage(e));
     }
   }, [canInvite, serverId]);
   useEffect(() => { void loadInvites(); }, [loadInvites]);
   const submitInvite = async () => {
     const email = inviteEmail.trim();
     if (!email || inviteBusy) return;
+    const requestedRole = inviteRole;
+    if (requestedRole === "guest" && !guestEnabled) {
+      setInviteError("访客邀请开关已关闭，请重新选择成员");
+      return;
+    }
+    const scope = requestTracker.current.currentScope(); const operation = ++inviteRequestGeneration.current; const sessionGeneration = getSessionGeneration();
+    const current = () => requestTracker.current.isScopeCurrent(scope) && inviteRequestGeneration.current === operation && getSessionGeneration() === sessionGeneration;
     setInviteBusy(true); setInviteError(null);
-    try { const created = await createServerInvite(serverId, email, guestEnabled ? inviteRole : "member"); setInvites((current) => [created, ...current]); setInviteEmail(""); setInviteRole("member"); setInviteOpen(false); }
-    catch (e) { setInviteError(stage3ErrorMessage(e)); }
-    finally { setInviteBusy(false); }
+    try { const created = await createServerInvite(serverId, email, requestedRole); if (current()) { setInvites((items) => [created, ...items]); setInviteEmail(""); setInviteRole("member"); setInviteOpen(false); } }
+    catch (e) { if (current()) setInviteError(stage3ErrorMessage(e)); }
+    finally { if (current()) setInviteBusy(false); }
   };
   const revokeInvite = async (invite: MobileInvite) => {
+    const scope = requestTracker.current.currentScope(); const operation = ++inviteRequestGeneration.current; const sessionGeneration = getSessionGeneration();
+    const current = () => requestTracker.current.isScopeCurrent(scope) && inviteRequestGeneration.current === operation && getSessionGeneration() === sessionGeneration;
     setInviteBusy(true); setInviteError(null);
-    try { await revokeServerInvite(serverId, invite.id); setInvites((current) => current.filter((row) => row.id !== invite.id)); }
-    catch (e) { setInviteError(stage3ErrorMessage(e)); }
-    finally { setInviteBusy(false); }
+    try { await revokeServerInvite(serverId, invite.id); if (current()) setInvites((items) => items.filter((row) => row.id !== invite.id)); }
+    catch (e) { if (current()) setInviteError(stage3ErrorMessage(e)); }
+    finally { if (current()) setInviteBusy(false); }
   };
   const createLink = async () => {
     if (linkBusy) return;
+    const scope = requestTracker.current.currentScope(); const operation = ++inviteRequestGeneration.current; const sessionGeneration = getSessionGeneration();
+    const current = () => requestTracker.current.isScopeCurrent(scope) && inviteRequestGeneration.current === operation && getSessionGeneration() === sessionGeneration;
     setLinkBusy(true); setInviteError(null);
-    try { const created = await createServerJoinLink(serverId, { expiresAt: null, maxUses: null }); setJoinLinks((current) => [created.link, ...current]); }
-    catch (e) { setInviteError(stage3ErrorMessage(e)); }
-    finally { setLinkBusy(false); }
+    try { const created = await createServerJoinLink(serverId, { expiresAt: null, maxUses: null }); if (current()) setJoinLinks((items) => [created.link, ...items]); }
+    catch (e) { if (current()) setInviteError(stage3ErrorMessage(e)); }
+    finally { if (current()) setLinkBusy(false); }
   };
   const revokeLink = async (link: MobileJoinLink) => {
+    const scope = requestTracker.current.currentScope(); const operation = ++inviteRequestGeneration.current; const sessionGeneration = getSessionGeneration();
+    const current = () => requestTracker.current.isScopeCurrent(scope) && inviteRequestGeneration.current === operation && getSessionGeneration() === sessionGeneration;
     setLinkBusy(true); setInviteError(null);
-    try { await revokeServerJoinLink(serverId, link.id); setJoinLinks((current) => current.filter((row) => row.id !== link.id)); }
-    catch (e) { setInviteError(stage3ErrorMessage(e)); }
-    finally { setLinkBusy(false); }
+    try { await revokeServerJoinLink(serverId, link.id); if (current()) setJoinLinks((items) => items.filter((row) => row.id !== link.id)); }
+    catch (e) { if (current()) setInviteError(stage3ErrorMessage(e)); }
+    finally { if (current()) setLinkBusy(false); }
   };
   const copyLink = async (link: MobileJoinLink) => {
+    if (!WEB_APP_URL) { setInviteError("未配置 Web 入口，无法复制加入链接"); return; }
     const url = `${WEB_APP_URL}/join/${link.token}`;
     try {
       await Clipboard.setStringAsync(url);
