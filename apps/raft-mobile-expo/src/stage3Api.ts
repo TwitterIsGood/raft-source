@@ -62,7 +62,10 @@ export type WikiArtifact = {
 };
 export type WikiDirectory = { pages: WikiArtifact[]; index: WikiArtifact | null; log: WikiArtifact | null };
 export type WikiPage = WikiArtifact & { markdown?: string | null; content?: string | null };
-export type WikiStatus = { space?: { status: string; wikiAgentName?: string | null } | null };
+export type WikiStatus = { space?: { status: string; wikiAgentId?: string | null; wikiAgentName?: string | null; wikiChannelId?: string | null; wikiChannelName?: string | null } | null };
+export type WikiSetupAgent = { id: string; name: string; status?: string | null; machineId?: string | null; external?: boolean; runtime?: string | null };
+export type WikiSetupChannel = { id: string; name?: string | null; type?: string; visibility?: string | null; archivedAt?: string | null };
+export type WikiSetupResources = { agents: WikiSetupAgent[]; channels: WikiSetupChannel[] };
 
 export function getServerTasks(serverId: string): Promise<{ tasks: MobileTask[] }> {
   return api("/api/tasks/server", {}, serverId);
@@ -81,6 +84,22 @@ export function setTaskStatus(serverId: string, taskId: string, status: MobileTa
 }
 export function getWikiStatus(serverId: string): Promise<WikiStatus> {
   return api("/api/wiki/status", {}, serverId);
+}
+export async function getWikiSetupResources(serverId: string): Promise<WikiSetupResources> {
+  const [agents, channels] = await Promise.all([
+    api<WikiSetupAgent[]>('/api/agents', {}, serverId),
+    api<WikiSetupChannel[]>('/api/channels?archived=exclude', {}, serverId),
+  ]);
+  return { agents: Array.isArray(agents) ? agents : [], channels: Array.isArray(channels) ? channels : [] };
+}
+export function createWikiAgent(serverId: string, name: string): Promise<WikiSetupAgent> {
+  return api('/api/agents', { method: 'POST', body: JSON.stringify({ name, description: '维护服务器 Wiki 文档。', runtime: 'codex' }) }, serverId);
+}
+export function createWikiChannel(serverId: string, name: string, agentId: string): Promise<WikiSetupChannel> {
+  return api('/api/channels', { method: 'POST', body: JSON.stringify({ name, description: '用于 Wiki Agent 设置、初始化和文档维护跟进协调的公开频道。', visibility: 'public', agentIds: [agentId] }) }, serverId);
+}
+export function setupWiki(serverId: string, agentId: string, channelId: string): Promise<WikiStatus> {
+  return api('/api/wiki/setup', { method: 'POST', body: JSON.stringify({ agentId, channelId }) }, serverId);
 }
 export function getWikiDirectory(serverId: string): Promise<WikiDirectory> {
   return api("/api/wiki/directory", {}, serverId);
