@@ -136,7 +136,14 @@ function MembersPanel({ serverId }: Props) {
     inviteTracker.current.beginScope();
     setInvites([]); setJoinLinks([]); setGuestEnabled(false); setInviteOpen(false); setInviteEmail(""); setInviteRole("member"); setInviteBusy(false); setLinkBusy(false); setCopiedLinkId(null); setInviteError(null);
     void load();
-    return () => { requestTracker.current.beginScope(); mutationGeneration.current += 1; };
+    return () => {
+      requestTracker.current.beginScope();
+      mutationGeneration.current += 1;
+      // Invalidate invite/list/copy callbacks when leaving the members page,
+      // even if the session remains active. This prevents late responses from
+      // repopulating invite state after the panel has been unmounted.
+      inviteTracker.current.beginScope();
+    };
   }, [load]);
   const actorRole = rows.find((item) => item.userId === actorUserId)?.role ?? null;
   const ownerCount = rows.filter((item) => item.role === "owner").length;

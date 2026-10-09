@@ -80,3 +80,15 @@ test("stage3 invite reads and email/link writes have independent generations", (
   assert.equal(tracker.isInviteWriteCurrent(invite), false);
   assert.equal(tracker.isLinkWriteCurrent(link), false);
 });
+
+test("stage3 invite callbacks are invalidated when the members scope is left", () => {
+  const tracker = createStage3InviteRequestTracker();
+  tracker.beginScope();
+  const read = tracker.beginRead();
+  const invite = tracker.beginInviteWrite();
+  const link = tracker.beginLinkWrite();
+  tracker.beginScope();
+  assert.equal(tracker.isReadCurrent(read), false);
+  assert.equal(tracker.isInviteWriteCurrent(invite), false);
+  assert.equal(tracker.isLinkWriteCurrent(link), false);
+});
