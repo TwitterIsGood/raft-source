@@ -49,7 +49,7 @@ function TasksPanel({ serverId }: Props) {
 
 function WikiPanel({ serverId }: Props) {
   const [status, setStatus] = useState<string>("加载中"); const [rows, setRows] = useState<WikiArtifact[]>([]); const [error, setError] = useState<string | null>(null); const [refreshing, setRefreshing] = useState(false); const [resetting, setResetting] = useState(false);
-  const [canManage, setCanManage] = useState(false); const [notice, setNotice] = useState<string | null>(null);
+  const [canRefresh, setCanRefresh] = useState(false); const [canReset, setCanReset] = useState(false); const [notice, setNotice] = useState<string | null>(null);
   const [selectedPage, setSelectedPage] = useState<WikiPage | null>(null); const [pageBusy, setPageBusy] = useState(false);
   const wikiTracker = useRef(createStage3RequestTracker());
   const roleTracker = useRef(createStage3RequestTracker());
@@ -74,13 +74,17 @@ function WikiPanel({ serverId }: Props) {
   }, [serverId]);
   useEffect(() => {
     wikiTracker.current.beginScope(); roleTracker.current.beginScope();
-    setStatus("加载中"); setRows([]); setSelectedPage(null); setCanManage(false); setNotice(null);
+    setStatus("加载中"); setRows([]); setSelectedPage(null); setCanRefresh(false); setCanReset(false); setNotice(null);
     void load();
-    const token = roleTracker.current.beginRequest(); const sessionGeneration = getSessionGeneration();
+    const roleToken = roleTracker.current.beginRequest(); const roleSession = getSessionGeneration();
     void Promise.all([getServerMembers(serverId), getCurrentUser()]).then(([members, user]) => {
-      if (!isStage3ResponseCurrent(roleTracker.current, token, sessionGeneration, getSessionGeneration())) return;
-      setCanManage(["owner", "admin"].includes(members.find((member) => member.userId === user.id)?.role ?? ""));
-    }).catch(() => { if (isStage3ResponseCurrent(roleTracker.current, token, sessionGeneration, getSessionGeneration())) setCanManage(false); });
+      if (!isStage3ResponseCurrent(roleTracker.current, roleToken, roleSession, getSessionGeneration())) return;
+      const role = members.find((member) => member.userId === user.id)?.role;
+      // These are separate UI gates; the API remains authoritative for the
+      // distinct editAgents/editChannelMetadata and editServerSettings checks.
+      setCanRefresh(role === "owner" || role === "admin");
+      setCanReset(role === "owner" || role === "admin");
+    }).catch(() => { if (isStage3ResponseCurrent(roleTracker.current, roleToken, roleSession, getSessionGeneration())) { setCanRefresh(false); setCanReset(false); } });
     return () => { wikiTracker.current.beginScope(); roleTracker.current.beginScope(); };
   }, [load, serverId]);
   const triggerRefresh = async () => {
@@ -119,7 +123,7 @@ function WikiPanel({ serverId }: Props) {
     const body = selectedPage.markdown ?? selectedPage.content ?? selectedPage.summary ?? "暂无正文";
     return <View style={styles.panel}><View style={styles.header}><Pressable accessibilityRole="button" accessibilityLabel="返回Wiki目录" onPress={() => setSelectedPage(null)}><Text style={styles.action}>‹ Wiki</Text></Pressable><Text numberOfLines={1} style={styles.title}>{selectedPage.title}</Text></View><ScrollView accessibilityLabel="Wiki正文" style={styles.wikiBody}>{parseWikiBlocks(body).map((block, index) => <WikiBlockView key={`${block.kind}-${index}`} block={block} />)}</ScrollView></View>;
   }
-  return <View style={styles.panel}><View style={styles.header}><Text style={styles.title}>Wiki</Text><View style={styles.headerActions}><Pressable accessibilityRole="button" accessibilityLabel="刷新Wiki" disabled={refreshing || resetting || !canManage} onPress={confirmRefresh}><Text style={[styles.action, (refreshing || resetting || !canManage) && styles.disabledText]}>{refreshing ? "处理中…" : status === "ready_uninitialized" ? "初始化" : "刷新"}</Text></Pressable>{canManage ? <Pressable accessibilityRole="button" accessibilityLabel="重置Wiki" disabled={refreshing || resetting || status === "不可用" || status === "加载中" || status === "setup_required"} onPress={confirmReset}><Text style={[styles.action, styles.dangerAction, (refreshing || resetting || status === "不可用" || status === "加载中" || status === "setup_required") && styles.disabledText]}>{resetting ? "重置中…" : "重置"}</Text></Pressable> : null}</View></View><Text style={styles.meta}>状态：{status}</Text>{status === "setup_required" || status === "ready_uninitialized" ? <Text style={styles.meta}>{status === "setup_required" ? "请先在 Web 设置 Wiki Agent 和公开 Wiki 频道。" : "Wiki 资源已就绪，点击初始化开始生成文档。"}</Text> : null}<ErrorText message={error} />{notice ? <Text accessibilityLabel="Wiki操作结果" style={styles.notice}>{notice}</Text> : null}{pageBusy ? <ActivityIndicator /> : <FlatList data={rows} keyExtractor={(item) => item.id} contentContainerStyle={styles.list} ListEmptyComponent={<Text style={styles.empty}>暂无可用 Wiki 页面</Text>} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityLabel={`打开Wiki页面 ${item.title}`} style={styles.card} onPress={() => void openPage(item)}><Text style={styles.cardTitle}>{item.title}</Text>{item.summary ? <Text style={styles.bodyText}>{item.summary}</Text> : null}</Pressable>} />}</View>;
+  return <View style={styles.panel}><View style={styles.header}><Text style={styles.title}>Wiki</Text><View style={styles.headerActions}><Pressable accessibilityRole="button" accessibilityLabel="刷新Wiki" disabled={refreshing || resetting || !canRefresh} onPress={confirmRefresh}><Text style={[styles.action, (refreshing || resetting || !canRefresh) && styles.disabledText]}>{refreshing ? "处理中…" : status === "ready_uninitialized" ? "初始化" : "刷新"}</Text></Pressable>{canReset ? <Pressable accessibilityRole="button" accessibilityLabel="重置Wiki" disabled={refreshing || resetting || status === "不可用" || status === "加载中" || status === "setup_required"} onPress={confirmReset}><Text style={[styles.action, styles.dangerAction, (refreshing || resetting || status === "不可用" || status === "加载中" || status === "setup_required") && styles.disabledText]}>{resetting ? "重置中…" : "重置"}</Text></Pressable> : null}</View></View><Text style={styles.meta}>状态：{status}</Text>{status === "setup_required" || status === "ready_uninitialized" ? <Text style={styles.meta}>{status === "setup_required" ? "请先在 Web 设置 Wiki Agent 和公开 Wiki 频道。" : "Wiki 资源已就绪，点击初始化开始生成文档。"}</Text> : null}<ErrorText message={error} />{notice ? <Text accessibilityLabel="Wiki操作结果" style={styles.notice}>{notice}</Text> : null}{pageBusy ? <ActivityIndicator /> : <FlatList data={rows} keyExtractor={(item) => item.id} contentContainerStyle={styles.list} ListEmptyComponent={<Text style={styles.empty}>暂无可用 Wiki 页面</Text>} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityLabel={`打开Wiki页面 ${item.title}`} style={styles.card} onPress={() => void openPage(item)}><Text style={styles.cardTitle}>{item.title}</Text>{item.summary ? <Text style={styles.bodyText}>{item.summary}</Text> : null}</Pressable>} />}</View>;
 }
 
 function WikiBlockView({ block }: { block: WikiBlock }) {
