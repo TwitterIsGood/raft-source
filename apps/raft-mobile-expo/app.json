@@ -3,7 +3,7 @@
     "name": "Raft",
     "slug": "raft-mobile",
     "version": "0.1.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "scheme": "raft",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -16,7 +16,13 @@
     },
     "plugins": [
       "expo-notifications",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-screen-orientation",
+        {
+          "initialOrientation": "DEFAULT"
+        }
+      ]
     ],
     "extra": {
       "apiBaseUrl": "https://bj1.v.lhb.ink:63204",
