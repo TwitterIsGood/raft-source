@@ -26,6 +26,21 @@ export type MobileMember = {
   role: Stage3ServerRole;
   joinedAt: string;
 };
+export type MobileInvite = {
+  id: string;
+  invitedEmail: string;
+  expiresAt: string;
+  role: Exclude<Stage3ServerRole, "owner" | "admin">;
+};
+export type MobileJoinLink = {
+  id: string;
+  token: string;
+  createdAt: string;
+  expiresAt: string | null;
+  maxUses: number | null;
+  useCount: number;
+  revokedAt: string | null;
+};
 export type MobileComputer = {
   id: string;
   name: string;
@@ -95,6 +110,37 @@ export function removeServerMember(serverId: string, userId: string): Promise<{ 
   return api(`/api/servers/${encodeURIComponent(serverId)}/members/${encodeURIComponent(userId)}`, {
     method: "DELETE",
   }, serverId);
+}
+export function getServerInvites(serverId: string): Promise<MobileInvite[]> {
+  return api(`/api/servers/${encodeURIComponent(serverId)}/invites`, {}, serverId);
+}
+export function createServerInvite(serverId: string, email: string, role: "member" | "guest" = "member"): Promise<MobileInvite> {
+  return api(`/api/servers/${encodeURIComponent(serverId)}/invites`, {
+    method: "POST",
+    body: JSON.stringify({ email, role }),
+  }, serverId);
+}
+export function revokeServerInvite(serverId: string, inviteId: string): Promise<{ ok: boolean }> {
+  return api(`/api/servers/${encodeURIComponent(serverId)}/invites/${encodeURIComponent(inviteId)}`, { method: "DELETE" }, serverId);
+}
+export function getServerJoinLinks(serverId: string): Promise<MobileJoinLink[]> {
+  return api(`/api/servers/${encodeURIComponent(serverId)}/join-links`, {}, serverId);
+}
+export function createServerJoinLink(serverId: string, options?: { expiresAt?: string | null; maxUses?: number | null }): Promise<{ token: string; link: MobileJoinLink }> {
+  return api(`/api/servers/${encodeURIComponent(serverId)}/join-links`, {
+    method: "POST",
+    body: JSON.stringify(options ?? { expiresAt: null, maxUses: null }),
+  }, serverId);
+}
+export function revokeServerJoinLink(serverId: string, linkId: string): Promise<{ ok: boolean }> {
+  return api(`/api/servers/${encodeURIComponent(serverId)}/join-links/${encodeURIComponent(linkId)}`, { method: "DELETE" }, serverId);
+}
+export async function getServerGuestFlag(serverId: string): Promise<boolean> {
+  const result = await api<{ evaluations?: Array<{ key: string; enabled?: boolean }> }>("/api/feature-flags/evaluate", {
+    method: "POST",
+    body: JSON.stringify({ keys: ["server_guest_v0"], serverId, platform: "mobile" }),
+  }, serverId);
+  return result.evaluations?.some((entry) => entry.key === "server_guest_v0" && entry.enabled === true) ?? false;
 }
 export async function getServerComputers(serverId: string): Promise<MobileComputer[]> {
   const response = await api<MobileComputer[] | { machines?: MobileComputer[] }>(`/api/servers/${encodeURIComponent(serverId)}/machines`, {}, serverId);
