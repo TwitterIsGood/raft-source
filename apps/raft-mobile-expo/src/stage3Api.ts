@@ -88,6 +88,9 @@ export function getWikiDirectory(serverId: string): Promise<WikiDirectory> {
 export function refreshWiki(serverId: string): Promise<unknown> {
   return api("/api/wiki/refresh", { method: "POST" }, serverId);
 }
+export function resetWiki(serverId: string): Promise<WikiStatus> {
+  return api("/api/wiki/reset", { method: "POST" }, serverId);
+}
 export function getWikiPage(serverId: string, artifactId: string): Promise<WikiPage> {
   return api(`/api/wiki/artifacts/${encodeURIComponent(artifactId)}`, {}, serverId);
 }

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Image, Keyboard, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Image, Keyboard, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { getChannels } from "../api";
 import { getSessionGeneration } from "../session";
 import { getCurrentUser } from "../settingsApi";
 import { API_BASE_URL, WEB_APP_URL } from "../config";
-import { addServerMember, claimTask, createServerInvite, createServerJoinLink, createTask, getServerComputers, getServerGuestFlag, getServerInvites, getServerJoinLinks, getServerMembers, getServerTasks, getWikiDirectory, getWikiPage, getWikiStatus, refreshWiki, removeServerMember, revokeServerInvite, revokeServerJoinLink, setTaskStatus, updateServerComputer, updateServerMemberRole, type MobileComputer, type MobileInvite, type MobileJoinLink, type MobileMember, type MobileTask, type WikiArtifact, type WikiPage } from "../stage3Api";
+import { addServerMember, claimTask, createServerInvite, createServerJoinLink, createTask, getServerComputers, getServerGuestFlag, getServerInvites, getServerJoinLinks, getServerMembers, getServerTasks, getWikiDirectory, getWikiPage, getWikiStatus, refreshWiki, resetWiki, removeServerMember, revokeServerInvite, revokeServerJoinLink, setTaskStatus, updateServerComputer, updateServerMemberRole, type MobileComputer, type MobileInvite, type MobileJoinLink, type MobileMember, type MobileTask, type WikiArtifact, type WikiPage } from "../stage3Api";
 import { canRemoveStage3Member, createStage3InviteRequestTracker, createStage3RequestTracker, filterStage3Members, getEditableStage3MemberRoles, getStage3AddMemberRoles, isStage3ResponseCurrent, STAGE3_ROUTES, type Stage3Route, type Stage3ServerRole } from "../stage3Navigation";
 import { isWikiExternalUrl, parseWikiBlocks, resolveWikiAssetUrl, splitWikiInline, type WikiBlock } from "../wikiRender";
 
@@ -48,22 +48,78 @@ function TasksPanel({ serverId }: Props) {
 }
 
 function WikiPanel({ serverId }: Props) {
-  const [status, setStatus] = useState<string>("加载中"); const [rows, setRows] = useState<WikiArtifact[]>([]); const [error, setError] = useState<string | null>(null); const [refreshing, setRefreshing] = useState(false);
+  const [status, setStatus] = useState<string>("加载中"); const [rows, setRows] = useState<WikiArtifact[]>([]); const [error, setError] = useState<string | null>(null); const [refreshing, setRefreshing] = useState(false); const [resetting, setResetting] = useState(false);
+  const [canManage, setCanManage] = useState(false); const [notice, setNotice] = useState<string | null>(null);
   const [selectedPage, setSelectedPage] = useState<WikiPage | null>(null); const [pageBusy, setPageBusy] = useState(false);
-  const load = useCallback(async () => { setError(null); try { const current = await getWikiStatus(serverId); const value = current.space?.status ?? "不可用"; setStatus(value); if (value !== "不可用") { const directory = await getWikiDirectory(serverId); setRows(directory.pages ?? []); } else setRows([]); } catch (e) { setStatus("不可用"); setRows([]); setError(e instanceof Error ? e.message : String(e)); } }, [serverId]);
-  useEffect(() => { void load(); }, [load]);
-  const triggerRefresh = async () => { setRefreshing(true); setError(null); try { await refreshWiki(serverId); await load(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setRefreshing(false); } };
+  const wikiTracker = useRef(createStage3RequestTracker());
+  const roleTracker = useRef(createStage3RequestTracker());
+  const load = useCallback(async () => {
+    const token = wikiTracker.current.beginRequest();
+    const sessionGeneration = getSessionGeneration();
+    setError(null);
+    try {
+      const current = await getWikiStatus(serverId);
+      if (!isStage3ResponseCurrent(wikiTracker.current, token, sessionGeneration, getSessionGeneration())) return;
+      const value = current.space?.status ?? "不可用";
+      setStatus(value);
+      if (value !== "不可用") {
+        const directory = await getWikiDirectory(serverId);
+        if (!isStage3ResponseCurrent(wikiTracker.current, token, sessionGeneration, getSessionGeneration())) return;
+        setRows(directory.pages ?? []);
+      } else setRows([]);
+    } catch (e) {
+      if (!isStage3ResponseCurrent(wikiTracker.current, token, sessionGeneration, getSessionGeneration())) return;
+      setStatus("不可用"); setRows([]); setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [serverId]);
+  useEffect(() => {
+    wikiTracker.current.beginScope(); roleTracker.current.beginScope();
+    setStatus("加载中"); setRows([]); setSelectedPage(null); setCanManage(false); setNotice(null);
+    void load();
+    const token = roleTracker.current.beginRequest(); const sessionGeneration = getSessionGeneration();
+    void Promise.all([getServerMembers(serverId), getCurrentUser()]).then(([members, user]) => {
+      if (!isStage3ResponseCurrent(roleTracker.current, token, sessionGeneration, getSessionGeneration())) return;
+      setCanManage(["owner", "admin"].includes(members.find((member) => member.userId === user.id)?.role ?? ""));
+    }).catch(() => { if (isStage3ResponseCurrent(roleTracker.current, token, sessionGeneration, getSessionGeneration())) setCanManage(false); });
+    return () => { wikiTracker.current.beginScope(); roleTracker.current.beginScope(); };
+  }, [load, serverId]);
+  const triggerRefresh = async () => {
+    wikiTracker.current.beginRequest(); const scope = wikiTracker.current.currentScope(); const sessionGeneration = getSessionGeneration();
+    setRefreshing(true); setError(null); setNotice(null);
+    try { const response = await refreshWiki(serverId) as { upToDate?: boolean }; if (wikiTracker.current.isScopeCurrent(scope) && sessionGeneration === getSessionGeneration()) { setNotice(response.upToDate ? "Wiki 已是最新。" : "已请求 Wiki Agent 扫描，文档将在发布后更新。"); await load(); } }
+    catch (e) { if (wikiTracker.current.isScopeCurrent(scope) && sessionGeneration === getSessionGeneration()) setError(e instanceof Error ? e.message : String(e)); }
+    finally { if (wikiTracker.current.isScopeCurrent(scope) && sessionGeneration === getSessionGeneration()) setRefreshing(false); }
+  };
+  const confirmRefresh = () => {
+    if (status !== "ready_uninitialized" && status !== "error") { void triggerRefresh(); return; }
+    Alert.alert("初始化 Wiki", "Wiki Agent 将读取符合条件的公开频道消息，生成首批文档。确认开始吗？", [
+      { text: "取消", style: "cancel" },
+      { text: "开始初始化", onPress: () => void triggerRefresh() },
+    ]);
+  };
+  const confirmReset = () => Alert.alert("重置 Wiki", "将删除当前目录和来源覆盖并停止维护提醒；Wiki 频道、Agent、对话和历史版本会保留。重置不会自动重新生成文档。确定继续吗？", [
+    { text: "取消", style: "cancel" },
+    { text: "重置", style: "destructive", onPress: () => void performReset() },
+  ]);
+  const performReset = async () => {
+    wikiTracker.current.beginRequest(); const scope = wikiTracker.current.currentScope(); const sessionGeneration = getSessionGeneration();
+    setResetting(true); setError(null); setNotice(null);
+    try { await resetWiki(serverId); if (wikiTracker.current.isScopeCurrent(scope) && sessionGeneration === getSessionGeneration()) { setSelectedPage(null); setRows([]); setNotice("Wiki 已重置；准备好后可重新初始化。"); await load(); } }
+    catch (e) { if (wikiTracker.current.isScopeCurrent(scope) && sessionGeneration === getSessionGeneration()) { const message = e instanceof Error ? e.message : String(e); setError(message.includes('resetCompleted') && message.includes('true') ? "Wiki 内容已重置，但维护提醒可能未全部停止；请再次重置。" : message); } }
+    finally { if (wikiTracker.current.isScopeCurrent(scope) && sessionGeneration === getSessionGeneration()) setResetting(false); }
+  };
   const openPage = async (item: WikiArtifact) => {
+    const token = wikiTracker.current.beginRequest(); const sessionGeneration = getSessionGeneration();
     setPageBusy(true); setError(null);
-    try { setSelectedPage(await getWikiPage(serverId, item.id)); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setPageBusy(false); }
+    try { const page = await getWikiPage(serverId, item.id); if (isStage3ResponseCurrent(wikiTracker.current, token, sessionGeneration, getSessionGeneration())) setSelectedPage(page); }
+    catch (e) { if (isStage3ResponseCurrent(wikiTracker.current, token, sessionGeneration, getSessionGeneration())) setError(e instanceof Error ? e.message : String(e)); }
+    finally { if (isStage3ResponseCurrent(wikiTracker.current, token, sessionGeneration, getSessionGeneration())) setPageBusy(false); }
   };
   if (selectedPage) {
     const body = selectedPage.markdown ?? selectedPage.content ?? selectedPage.summary ?? "暂无正文";
     return <View style={styles.panel}><View style={styles.header}><Pressable accessibilityRole="button" accessibilityLabel="返回Wiki目录" onPress={() => setSelectedPage(null)}><Text style={styles.action}>‹ Wiki</Text></Pressable><Text numberOfLines={1} style={styles.title}>{selectedPage.title}</Text></View><ScrollView accessibilityLabel="Wiki正文" style={styles.wikiBody}>{parseWikiBlocks(body).map((block, index) => <WikiBlockView key={`${block.kind}-${index}`} block={block} />)}</ScrollView></View>;
   }
-  return <View style={styles.panel}><View style={styles.header}><Text style={styles.title}>Wiki</Text><Pressable accessibilityRole="button" accessibilityLabel="刷新Wiki" disabled={refreshing} onPress={() => void triggerRefresh()}><Text style={[styles.action, refreshing && styles.disabledText]}>{refreshing ? "刷新中…" : "刷新"}</Text></Pressable></View><Text style={styles.meta}>状态：{status}</Text><ErrorText message={error} />{pageBusy ? <ActivityIndicator /> : <FlatList data={rows} keyExtractor={(item) => item.id} contentContainerStyle={styles.list} ListEmptyComponent={<Text style={styles.empty}>暂无可用 Wiki 页面</Text>} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityLabel={`打开Wiki页面 ${item.title}`} style={styles.card} onPress={() => void openPage(item)}><Text style={styles.cardTitle}>{item.title}</Text>{item.summary ? <Text style={styles.bodyText}>{item.summary}</Text> : null}</Pressable>} />}</View>;
+  return <View style={styles.panel}><View style={styles.header}><Text style={styles.title}>Wiki</Text><View style={styles.headerActions}><Pressable accessibilityRole="button" accessibilityLabel="刷新Wiki" disabled={refreshing || resetting || !canManage} onPress={confirmRefresh}><Text style={[styles.action, (refreshing || resetting || !canManage) && styles.disabledText]}>{refreshing ? "处理中…" : status === "ready_uninitialized" ? "初始化" : "刷新"}</Text></Pressable>{canManage ? <Pressable accessibilityRole="button" accessibilityLabel="重置Wiki" disabled={refreshing || resetting || status === "不可用" || status === "加载中" || status === "setup_required"} onPress={confirmReset}><Text style={[styles.action, styles.dangerAction, (refreshing || resetting || status === "不可用" || status === "加载中" || status === "setup_required") && styles.disabledText]}>{resetting ? "重置中…" : "重置"}</Text></Pressable> : null}</View></View><Text style={styles.meta}>状态：{status}</Text>{status === "setup_required" || status === "ready_uninitialized" ? <Text style={styles.meta}>{status === "setup_required" ? "请先在 Web 设置 Wiki Agent 和公开 Wiki 频道。" : "Wiki 资源已就绪，点击初始化开始生成文档。"}</Text> : null}<ErrorText message={error} />{notice ? <Text accessibilityLabel="Wiki操作结果" style={styles.notice}>{notice}</Text> : null}{pageBusy ? <ActivityIndicator /> : <FlatList data={rows} keyExtractor={(item) => item.id} contentContainerStyle={styles.list} ListEmptyComponent={<Text style={styles.empty}>暂无可用 Wiki 页面</Text>} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityLabel={`打开Wiki页面 ${item.title}`} style={styles.card} onPress={() => void openPage(item)}><Text style={styles.cardTitle}>{item.title}</Text>{item.summary ? <Text style={styles.bodyText}>{item.summary}</Text> : null}</Pressable>} />}</View>;
 }
 
 function WikiBlockView({ block }: { block: WikiBlock }) {
@@ -290,5 +346,5 @@ function ComputersPanel({ serverId }: Props) {
   return <View style={styles.panel}><View style={styles.header}><Text style={styles.title}>电脑</Text><Pressable accessibilityRole="button" accessibilityLabel="刷新电脑" onPress={() => void load()}><Text style={styles.action}>刷新</Text></Pressable></View><ErrorText message={error} /><FlatList data={rows} keyExtractor={(item) => item.id} contentContainerStyle={styles.list} ListEmptyComponent={<Text style={styles.empty}>暂无电脑</Text>} renderItem={({ item }) => <View style={styles.card}><Text style={styles.cardTitle}>{item.name}</Text><Text style={styles.meta}>{item.status} · {item.os || "系统未知"}</Text>{item.hostname ? <Text style={styles.bodyText}>{item.hostname}</Text> : null}<View style={styles.cardActions}><Pressable accessibilityRole="button" accessibilityLabel={`重命名电脑 ${item.name}`} onPress={() => { setEditing(item); setName(item.name); }}><Text style={styles.action}>重命名</Text></Pressable></View></View>} /><Modal visible={Boolean(editing)} transparent animationType="slide" onRequestClose={() => setEditing(null)}><View style={styles.modalBackdrop}><View style={styles.modalCard}><Text style={styles.modalTitle}>重命名电脑</Text><TextInput selectTextOnFocus value={name} onChangeText={setName} placeholder="电脑名称" accessibilityLabel="电脑名称" returnKeyType="done" blurOnSubmit onSubmitEditing={() => void saveName()} style={styles.modalInput} /><View style={styles.modalActions}><Pressable accessibilityRole="button" onPress={() => setEditing(null)}><Text style={styles.action}>取消</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="确认重命名电脑" disabled={!name.trim() || busy} onPress={() => void saveName()}><Text style={[styles.action, (!name.trim() || busy) && styles.disabledText]}>{busy ? "保存中…" : "保存"}</Text></Pressable></View></View></View></Modal></View>;
 }
 
-const styles = StyleSheet.create({ root: { flex: 1, backgroundColor: "#F6F8FB" }, body: { flex: 1 }, panel: { flex: 1, padding: 16 }, header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" }, headerActions: { flexDirection: "row", gap: 14 }, title: { fontSize: 24, fontWeight: "700", color: "#17212F", marginBottom: 10 }, action: { color: "#365FE8" }, disabledText: { opacity: 0.4 }, list: { gap: 8, paddingVertical: 8 }, card: { padding: 12, borderRadius: 10, borderWidth: 1, borderColor: "#E5EAF0", backgroundColor: "#FFF" }, invitePanel: { marginTop: 10, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: "#E5EAF0", backgroundColor: "#FFF" }, inviteHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" }, inviteRow: { borderTopWidth: 1, borderTopColor: "#F0F2F5", paddingTop: 8, marginTop: 8 }, cardTitle: { color: "#17212F", fontWeight: "700" }, cardActions: { flexDirection: "row", gap: 16, marginTop: 10 }, meta: { color: "#718096", fontSize: 12, marginTop: 4 }, bodyText: { color: "#4A5568", marginTop: 6, lineHeight: 21 }, filterInput: { minHeight: 42, borderWidth: 1, borderColor: "#CBD5E0", borderRadius: 8, paddingHorizontal: 10, color: "#17212F", marginTop: 8 }, filterRow: { gap: 8, paddingVertical: 8 }, filterChip: { borderWidth: 1, borderColor: "#CBD5E0", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: "#FFF" }, filterChipSelected: { borderColor: "#365FE8", backgroundColor: "#E8EEFF" }, filterChipText: { color: "#4A5568", fontSize: 12 }, filterChipTextSelected: { color: "#365FE8", fontSize: 12, fontWeight: "700" }, wikiBody: { flex: 1, marginTop: 8, padding: 12, borderWidth: 1, borderColor: "#E5EAF0", borderRadius: 10, backgroundColor: "#FFF" }, wikiHeading: { color: "#17212F", fontWeight: "700", marginTop: 12, marginBottom: 5 }, wikiH1: { fontSize: 24 }, wikiH2: { fontSize: 20 }, wikiH3: { fontSize: 17 }, wikiBullet: { flexDirection: "row", alignItems: "flex-start", gap: 8 }, wikiBulletMark: { color: "#365FE8", fontSize: 20, lineHeight: 24 }, wikiLink: { color: "#365FE8", textDecorationLine: "underline" }, wikiStrong: { fontWeight: "700" }, wikiLinkError: { color: "#C53030", marginLeft: 8 }, wikiImageBlock: { marginVertical: 12 }, wikiImage: { width: "100%", height: 180, backgroundColor: "#F6F8FB", borderRadius: 8 }, wikiCode: { marginVertical: 8, padding: 10, backgroundColor: "#17212F", borderRadius: 8 }, wikiCodeText: { color: "#FFF", fontFamily: "Menlo" }, empty: { color: "#718096", textAlign: "center", padding: 24 }, error: { color: "#C53030", marginBottom: 8 }, tabs: { flexDirection: "row", paddingVertical: 8, borderTopWidth: 1, borderTopColor: "#E5EAF0", backgroundColor: "#FFF" }, tab: { flex: 1, alignItems: "center", paddingVertical: 8 }, tabText: { color: "#718096" }, selected: { color: "#365FE8", fontWeight: "700" }, modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.3)" }, modalCard: { backgroundColor: "#FFF", padding: 20, borderTopLeftRadius: 16, borderTopRightRadius: 16 }, modalTitle: { color: "#17212F", fontSize: 20, fontWeight: "700", marginBottom: 14 }, modalInput: { borderWidth: 1, borderColor: "#E5EAF0", borderRadius: 8, padding: 10, color: "#17212F", marginBottom: 14 }, channelChoices: { gap: 8, marginVertical: 8 }, channelChoice: { padding: 10, borderRadius: 8, backgroundColor: "#F6F8FB" }, channelChoiceSelected: { borderWidth: 1, borderColor: "#365FE8", backgroundColor: "#E8EEFF" }, modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 18, marginTop: 14 },
+const styles = StyleSheet.create({ root: { flex: 1, backgroundColor: "#F6F8FB" }, body: { flex: 1 }, panel: { flex: 1, padding: 16 }, header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" }, headerActions: { flexDirection: "row", gap: 14 }, title: { fontSize: 24, fontWeight: "700", color: "#17212F", marginBottom: 10 }, action: { color: "#365FE8" }, dangerAction: { color: "#C53030" }, disabledText: { opacity: 0.4 }, list: { gap: 8, paddingVertical: 8 }, card: { padding: 12, borderRadius: 10, borderWidth: 1, borderColor: "#E5EAF0", backgroundColor: "#FFF" }, invitePanel: { marginTop: 10, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: "#E5EAF0", backgroundColor: "#FFF" }, inviteHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" }, inviteRow: { borderTopWidth: 1, borderTopColor: "#F0F2F5", paddingTop: 8, marginTop: 8 }, cardTitle: { color: "#17212F", fontWeight: "700" }, cardActions: { flexDirection: "row", gap: 16, marginTop: 10 }, meta: { color: "#718096", fontSize: 12, marginTop: 4 }, bodyText: { color: "#4A5568", marginTop: 6, lineHeight: 21 }, filterInput: { minHeight: 42, borderWidth: 1, borderColor: "#CBD5E0", borderRadius: 8, paddingHorizontal: 10, color: "#17212F", marginTop: 8 }, filterRow: { gap: 8, paddingVertical: 8 }, filterChip: { borderWidth: 1, borderColor: "#CBD5E0", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: "#FFF" }, filterChipSelected: { borderColor: "#365FE8", backgroundColor: "#E8EEFF" }, filterChipText: { color: "#4A5568", fontSize: 12 }, filterChipTextSelected: { color: "#365FE8", fontSize: 12, fontWeight: "700" }, wikiBody: { flex: 1, marginTop: 8, padding: 12, borderWidth: 1, borderColor: "#E5EAF0", borderRadius: 10, backgroundColor: "#FFF" }, wikiHeading: { color: "#17212F", fontWeight: "700", marginTop: 12, marginBottom: 5 }, wikiH1: { fontSize: 24 }, wikiH2: { fontSize: 20 }, wikiH3: { fontSize: 17 }, wikiBullet: { flexDirection: "row", alignItems: "flex-start", gap: 8 }, wikiBulletMark: { color: "#365FE8", fontSize: 20, lineHeight: 24 }, wikiLink: { color: "#365FE8", textDecorationLine: "underline" }, wikiStrong: { fontWeight: "700" }, wikiLinkError: { color: "#C53030", marginLeft: 8 }, wikiImageBlock: { marginVertical: 12 }, wikiImage: { width: "100%", height: 180, backgroundColor: "#F6F8FB", borderRadius: 8 }, wikiCode: { marginVertical: 8, padding: 10, backgroundColor: "#17212F", borderRadius: 8 }, wikiCodeText: { color: "#FFF", fontFamily: "Menlo" }, empty: { color: "#718096", textAlign: "center", padding: 24 }, error: { color: "#C53030", marginBottom: 8 }, notice: { color: "#2F855A", marginTop: 8 }, tabs: { flexDirection: "row", paddingVertical: 8, borderTopWidth: 1, borderTopColor: "#E5EAF0", backgroundColor: "#FFF" }, tab: { flex: 1, alignItems: "center", paddingVertical: 8 }, tabText: { color: "#718096" }, selected: { color: "#365FE8", fontWeight: "700" }, modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.3)" }, modalCard: { backgroundColor: "#FFF", padding: 20, borderTopLeftRadius: 16, borderTopRightRadius: 16 }, modalTitle: { color: "#17212F", fontSize: 20, fontWeight: "700", marginBottom: 14 }, modalInput: { borderWidth: 1, borderColor: "#E5EAF0", borderRadius: 8, padding: 10, color: "#17212F", marginBottom: 14 }, channelChoices: { gap: 8, marginVertical: 8 }, channelChoice: { padding: 10, borderRadius: 8, backgroundColor: "#F6F8FB" }, channelChoiceSelected: { borderWidth: 1, borderColor: "#365FE8", backgroundColor: "#E8EEFF" }, modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 18, marginTop: 14 },
 });
