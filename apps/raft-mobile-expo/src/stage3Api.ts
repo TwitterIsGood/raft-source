@@ -15,6 +15,8 @@ export type MobileTask = {
   createdByName?: string | null;
   claimedByName?: string | null;
   claimedById?: string | null;
+  claimedByType?: "user" | "agent" | null;
+  revision?: number | null;
   updatedAt: string;
 };
 export type MobileMember = {
@@ -80,6 +82,9 @@ export function createTask(serverId: string, channelId: string, title: string, d
 export function claimTask(serverId: string, taskId: string): Promise<{ task: MobileTask }> {
   return api(`/api/tasks/${encodeURIComponent(taskId)}/claim`, { method: "PATCH" }, serverId);
 }
+export function updateTaskAssignee(serverId: string, taskId: string, assignee: { type: "user" | "agent"; id: string } | null, expectedRevision?: number | null): Promise<{ task: MobileTask }> {
+  return api(`/api/tasks/${encodeURIComponent(taskId)}/assignee`, { method: "PATCH", body: JSON.stringify({ assignee, ...(expectedRevision == null ? {} : { expectedRevision }) }) }, serverId);
+}
 export function setTaskStatus(serverId: string, taskId: string, status: MobileTaskStatus): Promise<{ task: MobileTask }> {
   return api(`/api/tasks/${encodeURIComponent(taskId)}/status`, { method: "PATCH", body: JSON.stringify({ status }) }, serverId);
 }
@@ -117,6 +122,11 @@ export function getWikiPage(serverId: string, artifactId: string): Promise<WikiP
 }
 export function getServerMembers(serverId: string): Promise<MobileMember[]> {
   return api(`/api/servers/${encodeURIComponent(serverId)}/members`, {}, serverId);
+}
+export type MobileChannelMember = { id: string; name?: string | null; displayName?: string | null; avatarUrl?: string | null };
+export type MobileChannelMembers = { humans?: MobileChannelMember[]; agents?: MobileChannelMember[] };
+export function getChannelMembers(serverId: string, channelId: string): Promise<MobileChannelMembers> {
+  return api(`/api/channels/${encodeURIComponent(channelId)}/members`, {}, serverId);
 }
 export function updateServerMemberRole(serverId: string, userId: string, role: Stage3ServerRole): Promise<{ ok: boolean; changed: boolean }> {
   return api(`/api/servers/${encodeURIComponent(serverId)}/members/${encodeURIComponent(userId)}`, {
