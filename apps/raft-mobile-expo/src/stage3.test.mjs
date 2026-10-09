@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canRemoveStage3Member, createStage3RequestTracker, filterStage3Members, getEditableStage3MemberRoles, getStage3AddMemberRoles, isStage3ResponseCurrent, isStage3Route, STAGE3_ROUTES } from "./stage3Navigation.ts";
+import { canRemoveStage3Member, createStage3InviteRequestTracker, createStage3RequestTracker, filterStage3Members, getEditableStage3MemberRoles, getStage3AddMemberRoles, isStage3ResponseCurrent, isStage3Route, STAGE3_ROUTES } from "./stage3Navigation.ts";
 
 test("stage3 workspace routes cover tasks, wiki, members and computers", () => {
   assert.deepEqual(STAGE3_ROUTES.map((item) => item.route), ["tasks", "wiki", "members", "computers"]);
@@ -61,4 +61,22 @@ test("stage3 late load errors are rejected after a newer request or session", ()
   assert.equal(isStage3ResponseCurrent(tracker, stale, 4, 4), false);
   assert.equal(isStage3ResponseCurrent(tracker, current, 4, 5), false);
   assert.equal(isStage3ResponseCurrent(tracker, current, 4, 4), true);
+});
+
+test("stage3 invite reads and email/link writes have independent generations", () => {
+  const tracker = createStage3InviteRequestTracker();
+  tracker.beginScope();
+  const read = tracker.beginRead();
+  const invite = tracker.beginInviteWrite();
+  const link = tracker.beginLinkWrite();
+  assert.equal(tracker.isReadCurrent(read), false, "a write invalidates a stale list response");
+  assert.equal(tracker.isInviteWriteCurrent(invite), true, "link writes do not cancel email writes");
+  assert.equal(tracker.isLinkWriteCurrent(link), true);
+  const nextRead = tracker.beginRead();
+  assert.equal(tracker.isReadCurrent(nextRead), true);
+  assert.equal(tracker.isInviteWriteCurrent(invite), true);
+  tracker.beginScope();
+  assert.equal(tracker.isReadCurrent(nextRead), false);
+  assert.equal(tracker.isInviteWriteCurrent(invite), false);
+  assert.equal(tracker.isLinkWriteCurrent(link), false);
 });

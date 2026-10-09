@@ -19,6 +19,58 @@ export type Stage3ServerRole = "owner" | "admin" | "member" | "guest";
 export type Stage3RequestToken = { scope: number; request: number };
 export type Stage3RequestTracker = ReturnType<typeof createStage3RequestTracker>;
 
+export type Stage3InviteReadToken = { scope: number; generation: number; state: number };
+export type Stage3InviteWriteToken = { scope: number; generation: number };
+
+/**
+ * Keep invite reads separate from email and join-link writes. A link write
+ * must not cancel an email write (or leave its busy state stuck), while any
+ * write invalidates an older list response so it cannot overwrite local
+ * mutation results.
+ */
+export function createStage3InviteRequestTracker() {
+  let scope = 0;
+  let readGeneration = 0;
+  let inviteGeneration = 0;
+  let linkGeneration = 0;
+  let state = 0;
+  return {
+    beginScope() {
+      scope += 1;
+      readGeneration += 1;
+      inviteGeneration += 1;
+      linkGeneration += 1;
+      state += 1;
+    },
+    beginRead(): Stage3InviteReadToken {
+      return { scope, generation: ++readGeneration, state };
+    },
+    beginInviteWrite(): Stage3InviteWriteToken {
+      state += 1;
+      return { scope, generation: ++inviteGeneration };
+    },
+    beginLinkWrite(): Stage3InviteWriteToken {
+      state += 1;
+      return { scope, generation: ++linkGeneration };
+    },
+    isScopeCurrent(value: number) {
+      return value === scope;
+    },
+    currentScope() {
+      return scope;
+    },
+    isReadCurrent(token: Stage3InviteReadToken) {
+      return token.scope === scope && token.generation === readGeneration && token.state === state;
+    },
+    isInviteWriteCurrent(token: Stage3InviteWriteToken) {
+      return token.scope === scope && token.generation === inviteGeneration;
+    },
+    isLinkWriteCurrent(token: Stage3InviteWriteToken) {
+      return token.scope === scope && token.generation === linkGeneration;
+    },
+  };
+}
+
 /** Guard late member loads after a workspace switch or a newer request. */
 export function createStage3RequestTracker() {
   let scope = 0;
