@@ -116,6 +116,26 @@ export async function getMessages(serverId: string, channelId: string, before?: 
   const cursor = before ? `&before=${before}` : "";
   return api<{ messages: MessageResponse[]; historyLimited?: boolean }>(`/api/messages/channel/${channelId}?limit=50${cursor}`, {}, serverId);
 }
+export type MobileChannelFile = {
+  id: string;
+  messageId: string;
+  channelId: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  width?: number | null;
+  height?: number | null;
+  thumbnailUrl?: string | null;
+  createdAt: string;
+  uploader?: { type?: string; id?: string; name?: string | null; displayName?: string | null };
+  source?: { type?: string; channelId?: string; parentMessageId?: string | null; parentMessageShortId?: string | null };
+};
+
+export async function getChannelFiles(serverId: string, channelId: string, cursor?: string | null) {
+  const params = new URLSearchParams({ limit: "50" });
+  if (cursor) params.set("cursor", cursor);
+  return api<{ files: MobileChannelFile[]; nextCursor: string | null }>(`/api/channels/${encodeURIComponent(channelId)}/files?${params.toString()}`, {}, serverId);
+}
 export async function getMessageContext(serverId: string, channelId: string, messageId: string) {
   return api<{
     messages: MessageResponse[];

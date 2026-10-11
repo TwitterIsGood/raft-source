@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { ActivityScreen } from "./ActivityScreen";
 import { SavedScreen } from "./SavedScreen";
@@ -6,24 +6,29 @@ import { SearchScreen } from "./SearchScreen";
 import { createStage2Navigation, navigateStage2, STAGE2_ROUTES, type Stage2NavigationState, type Stage2Route } from "../stage2Navigation";
 import type { ActivityInboxRow, SavedMessage, SearchResult } from "../stage2Api";
 import { Stage3Navigator } from "./Stage3Navigator";
+import type { Stage3Route } from "../stage3Navigation";
 
 type Props = {
   serverId: string;
   initialRoute?: Stage2Route;
+  stage3Route?: Stage3Route | null;
   onOpenSearchResult?: (result: SearchResult) => void;
   onOpenActivityRow?: (row: ActivityInboxRow) => void;
   onOpenSavedMessage?: (item: SavedMessage) => void;
 };
 
 /** Isolated stage-2 navigation surface; App.tsx can mount it after review. */
-export function Stage2Navigator({ serverId, initialRoute = "activity", onOpenSearchResult, onOpenActivityRow, onOpenSavedMessage }: Props) {
+export function Stage2Navigator({ serverId, initialRoute = "activity", stage3Route = null, onOpenSearchResult, onOpenActivityRow, onOpenSavedMessage }: Props) {
   const [navigation, setNavigation] = useState<Stage2NavigationState>(() => createStage2Navigation(serverId, initialRoute));
-  const [showStage3, setShowStage3] = useState(false);
+  const [showStage3, setShowStage3] = useState(Boolean(stage3Route));
+  useEffect(() => {
+    setShowStage3(Boolean(stage3Route));
+  }, [stage3Route]);
   const select = (route: Stage2Route) => setNavigation((current) => navigateStage2(current, route));
   return <View style={styles.root}>
     <View style={styles.sectionHeader}>{showStage3 ? <Pressable accessibilityRole="button" accessibilityLabel="返回发现" onPress={() => setShowStage3(false)}><Text style={styles.back}>‹ 发现</Text></Pressable> : <Text style={styles.sectionTitle}>发现</Text>}{!showStage3 ? <Pressable accessibilityRole="button" accessibilityLabel="打开任务Wiki成员电脑" onPress={() => setShowStage3(true)}><Text style={styles.more}>更多页面</Text></Pressable> : null}</View>
     <View style={styles.content}>
-      {showStage3 ? <Stage3Navigator serverId={serverId} /> : null}
+      {showStage3 ? <Stage3Navigator serverId={serverId} initialRoute={stage3Route ?? "tasks"} /> : null}
       {!showStage3 ? (navigation.route === "search" ? <SearchScreen serverId={navigation.serverId} onOpenMessage={onOpenSearchResult} />
         : navigation.route === "saved" ? <SavedScreen serverId={navigation.serverId} onOpenMessage={onOpenSavedMessage} />
           : <ActivityScreen serverId={navigation.serverId} onOpenRow={onOpenActivityRow} />) : null}

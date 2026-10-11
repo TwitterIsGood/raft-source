@@ -9,12 +9,13 @@ import { addServerMember, claimTask, createServerInvite, createServerJoinLink, c
 import { canRemoveStage3Member, createStage3InviteRequestTracker, createStage3RequestTracker, filterStage3Members, getEditableStage3MemberRoles, getStage3AddMemberRoles, isStage3ResponseCurrent, STAGE3_ROUTES, type Stage3Route, type Stage3ServerRole } from "../stage3Navigation";
 import { isWikiExternalUrl, parseWikiBlocks, resolveWikiAssetUrl, splitWikiInline, type WikiBlock } from "../wikiRender";
 
-type Props = { serverId: string };
+type Props = { serverId: string; initialRoute?: Stage3Route };
 
 function ErrorText({ message }: { message: string | null }) { return message ? <Text style={styles.error}>{message}</Text> : null; }
 
-export function Stage3Navigator({ serverId }: Props) {
-  const [route, setRoute] = useState<Stage3Route>("tasks");
+export function Stage3Navigator({ serverId, initialRoute = "tasks" }: Props) {
+  const [route, setRoute] = useState<Stage3Route>(initialRoute);
+  useEffect(() => setRoute(initialRoute), [initialRoute]);
   return <View style={styles.root}>
     <View style={styles.body}>
       {route === "tasks" ? <TasksPanel serverId={serverId} />
