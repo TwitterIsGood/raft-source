@@ -1,7 +1,6 @@
 import "./helpers/domSetup";
 
 import assert from "node:assert/strict";
-import test, { afterEach } from "node:test";
 import { act } from "react";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import GravatarAvatar from "../src/components/member/GravatarAvatar";
@@ -57,9 +56,9 @@ test("GravatarAvatar caches a successful load across remounts of the same hash",
   assert.equal(second.container.querySelector("svg"), null);
 });
 
-// The deployed instance is served over plain HTTP, where `crypto.subtle` is
-// absent (secure-context-only). Deriving the hash client-side therefore
-// rejected unhandled; the placeholder icon is the correct outcome there.
+// On a plain-HTTP origin `crypto.subtle` is absent (secure-context-only).
+// Deriving the hash client-side therefore rejected unhandled; the placeholder
+// icon is the correct outcome there.
 test("GravatarAvatar keeps the placeholder when crypto.subtle is unavailable", async () => {
   const originalSubtle = crypto.subtle;
   const rejections: unknown[] = [];
