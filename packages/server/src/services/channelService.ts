@@ -527,7 +527,7 @@ async function createChannelWithExecutor(
   // ordinary public/private channel quota; they are invite-mediated shared
   // surfaces, not local channels a workspace can freely create.
   const [serverRow] = await executor.select({ plan: servers.plan }).from(servers).where(eq(servers.id, serverId));
-  const plan = (serverRow?.plan as ServerPlan) || "free";
+  const plan = (serverRow?.plan as ServerPlan) || "founder";
   const limits = getEffectiveLimits(plan);
   if (type !== "joint" && limits.maxChannels !== -1) {
     const [countRow] = await executor

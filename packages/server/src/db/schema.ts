@@ -379,7 +379,7 @@ export const servers = pgTable("servers", {
   // nothing is exposed by the default alone: the indexing master switch
   // (public_server_search_index_v0) stays closed until owners are notified.
   publicSearchEnabled: boolean("public_search_enabled").notNull().default(true),
-  plan: text("plan", { enum: ["free", "founder", "partner", "pro"] }).notNull().default("free"),
+  plan: text("plan", { enum: ["free", "founder", "partner", "pro"] }).notNull().default("founder"),
   translationEnabled: boolean("translation_enabled").notNull().default(false),
   // RFC-067 §3.6: the owner's workspace-wide product-analytics switch. When
   // false, nobody's activity in this server is linked to an analytics_id.

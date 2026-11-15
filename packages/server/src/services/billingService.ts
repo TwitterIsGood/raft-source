@@ -214,7 +214,7 @@ export async function getBillingSummary(serverId: string) {
     appsumoBillingReserved,
     plan: entitlement.plan,
     displayName: PLAN_CONFIG[entitlement.plan].displayName,
-    serverPlan: server?.plan ?? "free",
+    serverPlan: server?.plan ?? "founder",
     source: entitlement.source,
     sourceConflict,
     capacity: entitlement.capacity,

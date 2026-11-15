@@ -56,9 +56,9 @@ export function setBeforeServerResourceLockQueryForTest(
   beforeServerResourceLockQueryForTest = hook;
 }
 
-/** A server row's plan; a missing row counts as Free. getServerPlan and the search history window both read it here. */
+/** A server row's plan; a missing row counts as Founder. getServerPlan and the search history window both read it here. */
 function serverPlanOf(row: { plan: ServerPlan } | undefined): ServerPlan {
-  return row?.plan ?? "free";
+  return row?.plan ?? "founder";
 }
 
 /** Read the compatibility projection. License lifecycle writers update it under the server row lock.
@@ -102,7 +102,7 @@ function projectServerBillingEntitlement(
   row: ServerBillingEntitlementRow | undefined,
   now: Date,
 ): ServerBillingEntitlement {
-  const fallbackPlan = (row?.serverPlan as ServerPlan | undefined) ?? "free";
+  const fallbackPlan = (row?.serverPlan as ServerPlan | undefined) ?? "founder";
   const hasSubscription = Boolean(row?.subscriptionPlan);
   const hasEntitlingSubscription = Boolean(row?.subscriptionPlan && row.status && isSubscriptionEntitling(row.status));
   const hasInternalEntitlement = isInternalEntitlementPlan(fallbackPlan);

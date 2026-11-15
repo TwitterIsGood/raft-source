@@ -134,7 +134,7 @@ export async function registerMachine(
     if (options.webSessionFamilyId) await lockLiveSessionFamily(tx, options.webSessionFamilyId, userId);
     // Check plan quota
     const [serverRow] = await tx.select({ plan: servers.plan }).from(servers).where(eq(servers.id, serverId));
-    const plan = (serverRow?.plan as ServerPlan) || "free";
+    const plan = (serverRow?.plan as ServerPlan) || "founder";
     const limits = getEffectiveLimits(plan);
     if (limits.maxMachines !== -1) {
       const [countRow] = await tx.select({ count: sql<number>`count(*)::int` }).from(machines).where(eq(machines.serverId, serverId));

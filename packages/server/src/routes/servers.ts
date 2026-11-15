@@ -946,7 +946,7 @@ serverRouter.get("/unread-summary", async (req, res) => {
           }),
         );
         const summaryInputs = memberships.map((membership) => {
-          const historyCutoff = getHistoryCutoff((membership.plan ?? "free") as ServerPlan);
+          const historyCutoff = getHistoryCutoff((membership.plan ?? "founder") as ServerPlan);
           return {
             serverId: membership.id,
             historyCutoff,
