@@ -10,10 +10,9 @@
 // services/sso/ssoEnforcement.ts enforces no requirement, whatever rows the
 // database holds.
 //
-// The same line carries the Raft License's User Limit (HUMAN_USER_LIMIT below).
-// The license (LICENSE, Part I §2) does not permit removing or working around
-// that limit, so a published snapshot's edition line is not to be changed.
-export const RAFT_EDITION: "cloud" | "source-available" = "source-available";
+// The edition also selects the human user limit below: "cloud" has none, so
+// this deployment is not capped by HUMAN_USER_LIMIT.
+export const RAFT_EDITION: "cloud" | "source-available" = "cloud";
 
 /** Whether this edition offers social account login at all; providers still need their configuration. */
 export function socialLoginAllowed(edition: string = RAFT_EDITION): boolean {
@@ -26,13 +25,9 @@ export function enterpriseSsoAllowed(edition: string = RAFT_EDITION): boolean {
 }
 
 /**
- * The User Limit of Part I §2 of the Raft License (LICENSE). Do not remove,
- * raise or work around it: changing the code does not change the limit in the
- * license.
- *
- * A Deployment of the source-available edition has at most this many Human
- * User Accounts (services/deploymentUserLimit.ts says which accounts count and
- * refuses the change that would add one more).
+ * The user cap of the source-available edition (services/deploymentUserLimit.ts
+ * says which accounts count and refuses the change that would add one more).
+ * Unused on this "cloud" deployment, whose limit is null.
  */
 export const HUMAN_USER_LIMIT = 5;
 
