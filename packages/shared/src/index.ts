@@ -143,7 +143,7 @@ import type { FeedbackTranscriptLookupOutcome, FeedbackTranscriptOutcomeObjectPl
 // Joint channel limits (contract v0.3 §18.6). Servers include the host and
 // unexpired pending invite targets; the free-server cap uses the same billing
 // projection as every other paid gate (`canUseProBillingFeatures`).
-export const MAX_JOINT_CHANNEL_SERVERS = 30;
+export const MAX_JOINT_CHANNEL_SERVERS = 1000;
 export const MAX_JOINT_CHANNEL_FREE_SERVERS = 2;
 /** A Free server may host this many Joint Channels that another server has joined. */
 export const MAX_FREE_SERVER_HOSTED_JOINT_CHANNELS = 1;
@@ -6135,8 +6135,8 @@ export const DISPLAY_PLANS: DisplayPlan[] = ["free", "pro", "enterprise"];
 export type BillingInterval = "monthly" | "annual";
 export const DEFAULT_BILLING_INTERVAL: BillingInterval = "annual";
 export const FREE_MONTHLY_FILE_UPLOAD_LIMIT_BYTES = 100 * 1024 * 1024;
-export const FREE_SINGLE_FILE_UPLOAD_LIMIT_BYTES = 50 * 1024 * 1024;
-export const PRO_SINGLE_FILE_UPLOAD_LIMIT_BYTES = 200 * 1024 * 1024;
+export const FREE_SINGLE_FILE_UPLOAD_LIMIT_BYTES = 1024 * 1024 * 1024;
+export const PRO_SINGLE_FILE_UPLOAD_LIMIT_BYTES = 1024 * 1024 * 1024;
 
 export function getSingleFileUploadLimitBytes(plan: ServerPlan, now: Date = new Date()): number {
   return canUseProBillingFeatures(plan, now)
@@ -6145,7 +6145,9 @@ export function getSingleFileUploadLimitBytes(plan: ServerPlan, now: Date = new 
 }
 
 export function getSingleFileUploadLimitLabel(plan: ServerPlan, now: Date = new Date()): string {
-  return canUseProBillingFeatures(plan, now) ? "200MB" : "50MB";
+  const limitBytes = getSingleFileUploadLimitBytes(plan, now);
+  const gibibyte = 1024 * 1024 * 1024;
+  return limitBytes % gibibyte === 0 ? `${limitBytes / gibibyte}GB` : `${limitBytes / (1024 * 1024)}MB`;
 }
 
 function nonNegativeInteger(value: number): number {

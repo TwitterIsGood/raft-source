@@ -178,9 +178,9 @@ test("write budgets: every app agent API route but a GET spends core's agent wri
   // A large body is charged ahead of its parser (app.ts), by the same class, and passed at the route; the app's client gate goes first there too.
   assert.deepEqual(firstPartyAppAgentApiLargeBodies().map((body) => [body.path, (body.limit as { __agentApiWriteBudget?: string } | null)?.__agentApiWriteBudget]), [["/internal/agent-api/artifacts/push", "artifactWrites"]]);
   assert.deepEqual(firstPartyAppAgentApiLargeBodies().map((body) => (body.clientGate as { __agentApiClientGate?: string }).__agentApiClientGate), ["artifacts"]);
-  // At least twice the busiest real minute (2026-11-01..08): uploads 82 / 82, Artifacts' other writes 6 / 6 and pushes 5 / 7.
-  assert.deepEqual(AGENT_API_WRITE_BUDGETS.artifactUploads, { perAgent: 600, perServer: 1200, what: "artifact file uploads" });
-  assert.deepEqual(AGENT_API_WRITE_BUDGETS.artifactWrites, { perAgent: 60, perServer: 600, what: "artifact changes" });
+  // This deployment raises every class to 100k units per minute.
+  assert.deepEqual(AGENT_API_WRITE_BUDGETS.artifactUploads, { perAgent: 100_000, perServer: 100_000, what: "artifact file uploads" });
+  assert.deepEqual(AGENT_API_WRITE_BUDGETS.artifactWrites, { perAgent: 100_000, perServer: 100_000, what: "artifact changes" });
 });
 
 test("write budgets: an app's write route is budgeted without asking, and one with no class refuses to mount", () => {

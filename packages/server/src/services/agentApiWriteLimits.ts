@@ -32,45 +32,38 @@ export const AGENT_API_WRITE_WINDOW_SECONDS = 60;
  * one per resolution id (each notifies or adds someone), a task create one per
  * task in its batch, an Artifact review one per comment in it.
  */
-// Sized from the fleet-wide 1-minute peaks over 7 days (2026-11-01..08, no
-// 429s): every limit is at least twice the busiest real agent and server.
-// Peaks per agent / per server: messages 56 / 57, reactions 8 / 12, mention
-// actions 6 / 6, task writes 273 / 290 (one burst of status updates),
-// channel writes 22 / 22, other writes 24 / 24. Artifacts' agent writes
-// (same days, all replicas): pushes 5 / 7, its other writes (mostly comments)
-// 6 / 6, both in artifactWrites, apart from core's other writes so each keeps
-// at least twice its headroom; file uploads 82 / 82.
+// This deployment raises every budget to 100k units per minute per agent and
+// per server: high enough that no real workload meets it, while a runaway
+// agent loop still stops at a finite number instead of never.
 export const AGENT_API_WRITE_BUDGETS: Record<AgentApiWriteBudgetClass, AgentApiWriteBudget> = {
   /** send, v2 send, task reply, the assistant's send/forward as owner and notify. */
-  messages: { perAgent: 120, perServer: 600, what: "messages" },
-  reactions: { perAgent: 60, perServer: 600, what: "reactions" },
-  mentionActions: { perAgent: 100, perServer: 1000, what: "mention notifications" },
+  messages: { perAgent: 100_000, perServer: 100_000, what: "messages" },
+  reactions: { perAgent: 100_000, perServer: 100_000, what: "reactions" },
+  mentionActions: { perAgent: 100_000, perServer: 100_000, what: "mention notifications" },
   /** create, assign, update status, amend, convert, delete, claim, unclaim. */
-  taskWrites: { perAgent: 600, perServer: 1200, what: "task changes" },
+  taskWrites: { perAgent: 100_000, perServer: 100_000, what: "task changes" },
   /** create, join, member add. */
-  channelWrites: { perAgent: 60, perServer: 300, what: "channel changes" },
+  channelWrites: { perAgent: 100_000, perServer: 100_000, what: "channel changes" },
   /** attachment comments, uploads, thread follows, action and app prepares. */
-  otherWrites: { perAgent: 60, perServer: 600, what: "writes of this kind" },
+  otherWrites: { perAgent: 100_000, perServer: 100_000, what: "writes of this kind" },
   /**
    * A send's `reconcileOnly` lookup (send, v2 send, task reply): asks whether
    * an earlier send committed and writes nothing. Its own budget, so a client
    * near the messages limit can still learn whether its send landed, while a
    * loop of lookups stays bounded.
    */
-  reconcile: { perAgent: 60, perServer: 600, what: "send status checks" },
+  reconcile: { perAgent: 100_000, perServer: 100_000, what: "send status checks" },
   /**
    * Artifacts' writes but a push's file uploads: pushes, imports, comments,
    * reviews (one per comment), comment images, follows, unfollows, moves,
-   * deletes and attachment saves. Peaks: pushes 5 / 7, the rest 6 / 6.
+   * deletes and attachment saves.
    */
-  artifactWrites: { perAgent: 60, perServer: 600, what: "artifact changes" },
+  artifactWrites: { perAgent: 100_000, perServer: 100_000, what: "artifact changes" },
   /**
    * An Artifact push's file uploads (`PUT /artifacts/uploads/:sha256`, one
-   * request per new file). Peak 82 / 82; 600 an agent keeps a version of
-   * AGENT_API_ARTIFACT_MAX_FILES_PER_VERSION (500) new files pushable within
-   * a minute. Their bytes are bounded by the upload quotas besides.
+   * request per new file). Their bytes are still bounded by the upload quotas.
    */
-  artifactUploads: { perAgent: 600, perServer: 1200, what: "artifact file uploads" },
+  artifactUploads: { perAgent: 100_000, perServer: 100_000, what: "artifact file uploads" },
 };
 
 export type AgentApiWriteAdmission =

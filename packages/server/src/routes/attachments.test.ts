@@ -88,7 +88,7 @@ test("normalizeAttachmentFilename leaves normal filenames unchanged", () => {
   assert.equal(normalizeAttachmentFilename("café.pdf"), "café.pdf");
 });
 
-test("attachment single-file limit stays 50MB for Free and expands to 200MB for Pro", () => {
+test("attachment single-file limit is 1GB on every plan", () => {
   const postTrial = new Date("2026-06-23T12:00:00Z");
   assert.equal(getAttachmentFileSizeLimitBytes("free", postTrial), MAX_ATTACHMENT_FILE_SIZE_BYTES);
   assert.equal(getAttachmentFileSizeLimitBytes("pro", postTrial), MAX_PRO_ATTACHMENT_FILE_SIZE_BYTES);
@@ -98,7 +98,7 @@ test("attachment single-file limit stays 50MB for Free and expands to 200MB for 
   assert.equal(isOversizedUploadedFile({ size: MAX_ATTACHMENT_FILE_SIZE_BYTES + 1 }, MAX_ATTACHMENT_FILE_SIZE_BYTES), true);
   assert.equal(isOversizedUploadedFile({ size: MAX_ATTACHMENT_FILE_SIZE_BYTES + 1 }, MAX_PRO_ATTACHMENT_FILE_SIZE_BYTES), false);
   assert.deepEqual(buildAttachmentTooLargeResponse(MAX_PRO_ATTACHMENT_FILE_SIZE_BYTES), {
-    error: "Max 200MB per file",
+    error: "Max 1GB per file",
     errorCode: "ATTACHMENT_TOO_LARGE",
     maxBytes: MAX_PRO_ATTACHMENT_FILE_SIZE_BYTES,
   });
@@ -109,22 +109,22 @@ test("legacy browser uploads ignore the direct-upload threshold and keep their t
   const postTrial = new Date("2026-06-23T12:00:00Z");
   try {
     delete process.env.ATTACHMENT_DIRECT_UPLOAD_THRESHOLD_BYTES;
-    assert.equal(getLegacyAttachmentFileSizeLimitBytes("free", postTrial), 50 * 1024 * 1024);
-    assert.equal(getLegacyAttachmentFileSizeLimitBytes("pro", postTrial), 90 * 1024 * 1024);
+    assert.equal(getLegacyAttachmentFileSizeLimitBytes("free", postTrial), MAX_ATTACHMENT_FILE_SIZE_BYTES);
+    assert.equal(getLegacyAttachmentFileSizeLimitBytes("pro", postTrial), MAX_PRO_ATTACHMENT_FILE_SIZE_BYTES);
 
     process.env.ATTACHMENT_DIRECT_UPLOAD_THRESHOLD_BYTES = String(10 * 1024 * 1024);
-    assert.equal(getLegacyAttachmentFileSizeLimitBytes("free", postTrial), 50 * 1024 * 1024);
-    assert.equal(getLegacyAttachmentFileSizeLimitBytes("pro", postTrial), 90 * 1024 * 1024);
-    assert.deepEqual(buildAttachmentTooLargeResponse(90 * 1024 * 1024), {
-      error: "Max 90MB per file",
+    assert.equal(getLegacyAttachmentFileSizeLimitBytes("free", postTrial), MAX_ATTACHMENT_FILE_SIZE_BYTES);
+    assert.equal(getLegacyAttachmentFileSizeLimitBytes("pro", postTrial), MAX_PRO_ATTACHMENT_FILE_SIZE_BYTES);
+    assert.deepEqual(buildAttachmentTooLargeResponse(MAX_PRO_ATTACHMENT_FILE_SIZE_BYTES), {
+      error: "Max 1GB per file",
       errorCode: "ATTACHMENT_TOO_LARGE",
-      maxBytes: 90 * 1024 * 1024,
+      maxBytes: MAX_PRO_ATTACHMENT_FILE_SIZE_BYTES,
     });
 
     process.env.ATTACHMENT_DIRECT_UPLOAD_THRESHOLD_BYTES = String(200 * 1024 * 1024);
     assert.equal(
       getLegacyAttachmentFileSizeLimitBytes("pro", postTrial),
-      90 * 1024 * 1024,
+      MAX_PRO_ATTACHMENT_FILE_SIZE_BYTES,
       "raising the direct threshold cannot raise the legacy transport safety cap",
     );
   } finally {

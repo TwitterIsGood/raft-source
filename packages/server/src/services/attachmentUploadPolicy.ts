@@ -1,7 +1,9 @@
 import { getSingleFileUploadLimitBytes, type ServerPlan } from "@botiverse/raft-shared";
 
 const DEFAULT_DIRECT_UPLOAD_THRESHOLD_BYTES = 10 * 1024 * 1024;
-const LEGACY_ATTACHMENT_SAFE_LIMIT_BYTES = 90 * 1024 * 1024;
+// This deployment sits behind Caddy, not Cloudflare, so the browser multipart
+// request has no 100 MB request-body ceiling to stay under.
+const LEGACY_ATTACHMENT_SAFE_LIMIT_BYTES = 1024 * 1024 * 1024;
 
 function integerEnv(name: string, fallback: number, minimum: number, maximum: number): number {
   const raw = process.env[name];

@@ -153,13 +153,13 @@ test("billing capacities reflect Free Pro Founder contract", () => {
   const postTrial = new Date("2026-06-23T12:00:00Z");
 
   assert.equal(FREE_MONTHLY_FILE_UPLOAD_LIMIT_BYTES, 100 * 1024 * 1024);
-  assert.equal(FREE_SINGLE_FILE_UPLOAD_LIMIT_BYTES, 50 * 1024 * 1024);
+  assert.equal(FREE_SINGLE_FILE_UPLOAD_LIMIT_BYTES, 1024 * 1024 * 1024);
   assert.equal(MAX_FREE_SERVER_HOSTED_JOINT_CHANNELS, 1);
-  assert.equal(PRO_SINGLE_FILE_UPLOAD_LIMIT_BYTES, 200 * 1024 * 1024);
+  assert.equal(PRO_SINGLE_FILE_UPLOAD_LIMIT_BYTES, 1024 * 1024 * 1024);
   assert.equal(getSingleFileUploadLimitBytes("free", postTrial), FREE_SINGLE_FILE_UPLOAD_LIMIT_BYTES);
-  assert.equal(getSingleFileUploadLimitLabel("free", postTrial), "50MB");
+  assert.equal(getSingleFileUploadLimitLabel("free", postTrial), "1GB");
   assert.equal(getSingleFileUploadLimitBytes("pro", postTrial), PRO_SINGLE_FILE_UPLOAD_LIMIT_BYTES);
-  assert.equal(getSingleFileUploadLimitLabel("pro", postTrial), "200MB");
+  assert.equal(getSingleFileUploadLimitLabel("pro", postTrial), "1GB");
   assert.equal(getEffectiveLimits("free", postTrial).messageHistoryDays, 30);
   assert.equal(getEffectiveLimits("free", postTrial).maxAgents, -1);
   assert.equal(getBillingCapacity({ plan: "free" }, postTrial).maxAgents, -1);

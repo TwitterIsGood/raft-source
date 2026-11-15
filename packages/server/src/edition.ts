@@ -3,25 +3,23 @@
 // line below to "source-available" in every published snapshot, and the
 // export fails unless it finds exactly that line.
 //
-// The source-available edition has no social account login (Google, GitHub,
-// Apple): services/socialAuthService.ts refuses it whatever the environment
-// configures. Nor does it have enterprise single sign-on (OIDC and SAML, with
-// "Require SSO"): routes/sso.ts and routes/serverSso.ts refuse every route, and
-// services/sso/ssoEnforcement.ts enforces no requirement, whatever rows the
-// database holds.
+// The edition selects the human user limit below: "cloud" has none, so this
+// deployment is not capped by HUMAN_USER_LIMIT.
 //
-// The edition also selects the human user limit below: "cloud" has none, so
-// this deployment is not capped by HUMAN_USER_LIMIT.
+// This deployment also turns social account login (Google, GitHub, Apple) and
+// enterprise single sign-on (OIDC, SAML, "Require SSO") off outright: this
+// instance authenticates with email and password only, whatever the
+// environment configures and whatever rows the database holds.
 export const RAFT_EDITION: "cloud" | "source-available" = "cloud";
 
-/** Whether this edition offers social account login at all; providers still need their configuration. */
-export function socialLoginAllowed(edition: string = RAFT_EDITION): boolean {
-  return edition === "cloud";
+/** Social account login is disabled on this deployment. */
+export function socialLoginAllowed(_edition: string = RAFT_EDITION): boolean {
+  return false;
 }
 
-/** Whether this edition offers enterprise single sign-on (OIDC, SAML, "Require SSO") at all. */
-export function enterpriseSsoAllowed(edition: string = RAFT_EDITION): boolean {
-  return edition === "cloud";
+/** Enterprise single sign-on (OIDC, SAML, "Require SSO") is disabled on this deployment. */
+export function enterpriseSsoAllowed(_edition: string = RAFT_EDITION): boolean {
+  return false;
 }
 
 /**
